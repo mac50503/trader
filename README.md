@@ -103,7 +103,12 @@ python main.py
 
 ---
 
-## 📊 Strategy: EMA Pullback Trend Following
+## 📊 Strategy: EMA Pullback Pro
+
+### Overview
+**EMA Pullback Pro** is a trend-following strategy that identifies pullbacks (retracements) to the fast EMA within a confirmed trend. It enters when price touches the EMA and bounces, using the EMA as dynamic support/resistance. Positions close when price falls a specific percentage below the EMA.
+
+**Philosophy**: Small losses, let big trends run. The EMA is not just an indicator — it IS the trade.
 
 ### Entry Rules (BUY)
 1. **Uptrend confirmed**: `EMA_fast > EMA_slow`
@@ -141,6 +146,19 @@ price=2350 → stop = 2342.95  (moves up)
 price drops to 2342.95 → stop hit → close with profit
 ```
 
+### Strategy Parameters
+
+| Parameter | Default | Type | Description |
+|-----------|---------|------|-------------|
+| `ema_fast` | 21 | int | Fast EMA period (entry/exit/stop) |
+| `ema_slow` | 50 | int | Slow EMA period (trend filter) |
+| `atr_period` | 14 | int | ATR period (for future filters) |
+| `touch_tolerance_atr` | 0.5 | float | Touch tolerance in ATR multiples (0.5 = half ATR) |
+| `exit_pct_below_ema` | 0.3 | float | % below/above EMA that triggers exit (0.3 = 0.3%) |
+| `rsi_period` | 14 | int | RSI period (for optional filter) |
+| `use_rsi_filter` | False | bool | Enable RSI filter on entry |
+| `allow_short` | False | bool | Enable SELL signals (short selling) |
+
 ---
 
 ## ⚙️ Configuration
@@ -149,6 +167,7 @@ All parameters are configurable from the Settings tab in the UI or via `.env`:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `ACTIVE_STRATEGY` | EMA Pullback Pro | Active trading strategy |
 | `EMA_FAST` | 21 | Fast EMA period (entry/exit/stop) |
 | `EMA_SLOW` | 50 | Slow EMA period (trend filter) |
 | `ATR_PERIOD` | 14 | ATR period (optional, for future filters) |
