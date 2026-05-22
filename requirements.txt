@@ -1,0 +1,25 @@
+# Core
+python-dotenv>=1.0.0
+requests>=2.31.0
+websocket-client>=1.7.0
+
+# Data & Analysis
+pandas>=2.0.0
+numpy>=1.26.0
+
+# Charting
+matplotlib>=3.8.0
+
+# Database: sqlite3 is built into Python — no install needed
+# UI: tkinter is built into Python — no install needed
+
+# Testing
+pytest>=8.0.0
+pytest-mock>=3.14.0
+
+# ── Optional: pandas-ta (requires Python < 3.14 due to numba dependency) ──────
+# If you are on Python 3.10–3.13, you can install pandas-ta for additional
+# indicators. The indicators.py module uses pure pandas/numpy by default,
+# so pandas-ta is NOT required.
+#
+# pip install pandas-ta==0.3.14b   # Python 3.10-3.13 only
