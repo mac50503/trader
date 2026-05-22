@@ -39,6 +39,7 @@ MAX_DAILY_LOSS_PERCENT: float = _get("MAX_DAILY_LOSS_PERCENT", 3.0, float)
 MAX_OPEN_POSITIONS: int     = _get("MAX_OPEN_POSITIONS", 3, int)
 
 # ── Strategy ──────────────────────────────────────────────────────────────────
+ACTIVE_STRATEGY: str           = _get("ACTIVE_STRATEGY", "EMA Pullback Pro")
 EMA_FAST: int                  = _get("EMA_FAST", 21, int)
 EMA_SLOW: int                  = _get("EMA_SLOW", 50, int)
 ATR_PERIOD: int                = _get("ATR_PERIOD", 14, int)

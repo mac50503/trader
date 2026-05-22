@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional
 
-from strategies.ema_trend_strategy import EmaTrendStrategy
+from strategies.strategy_registry import StrategyRegistry
 from risk_management.risk_manager import RiskManager
 from utils.logger import get_logger
 from typing import Optional
@@ -27,7 +27,7 @@ class SettingsPanel:
     def __init__(
         self,
         parent: tk.Frame,
-        strategy: EmaTrendStrategy,
+        strategy,
         risk_manager: RiskManager,
         theme: dict,
         get_bot_engine=None,   # callable that returns current BotEngine (or None)
@@ -58,6 +58,39 @@ class SettingsPanel:
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # ── Strategy Selection ─────────────────────────────────────────────
+        strategy_frame = tk.LabelFrame(
+            scroll_frame, text=" Active Strategy ",
+            bg=T["bg"], fg=T["text"],
+            font=T["font_title"], bd=1, relief=tk.FLAT,
+        )
+        strategy_frame.pack(fill=tk.X, padx=8, pady=8)
+
+        row = tk.Frame(strategy_frame, bg=T["bg"])
+        row.pack(fill=tk.X, padx=8, pady=8)
+
+        tk.Label(
+            row, text="Strategy:", bg=T["bg"],
+            fg=T["text_dim"], width=22, anchor=tk.W,
+        ).pack(side=tk.LEFT)
+
+        available_strategies = StrategyRegistry.list_strategies()
+        self._vars["active_strategy"] = tk.StringVar(value=config.ACTIVE_STRATEGY)
+        strategy_combo = ttk.Combobox(
+            row, textvariable=self._vars["active_strategy"],
+            values=available_strategies,
+            state="readonly", width=30,
+        )
+        strategy_combo.pack(side=tk.LEFT, padx=8)
+
+        hint_frame = tk.Frame(strategy_frame, bg=T["bg"])
+        hint_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
+        tk.Label(
+            hint_frame,
+            text="  • Select which trading strategy to use. Changes take effect on next bot start.",
+            bg=T["bg"], fg=T["text_dim"], font=("Segoe UI", 8), anchor=tk.W,
+        ).pack(side=tk.LEFT)
 
         # ── Strategy Settings ──────────────────────────────────────────────
         self._build_section(
@@ -211,6 +244,12 @@ class SettingsPanel:
     def _apply_settings(self) -> None:
         """Read form values and update strategy + risk manager."""
         try:
+            # Update active strategy (takes effect on next bot start)
+            if "active_strategy" in self._vars:
+                selected_strategy = self._vars["active_strategy"].get()
+                config.ACTIVE_STRATEGY = selected_strategy
+                logger.info(f"Active strategy set to: {selected_strategy}")
+
             # Update strategy params
             strategy_keys = [
                 "ema_fast", "ema_slow", "atr_period",

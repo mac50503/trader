@@ -21,7 +21,7 @@ import threading
 from typing import Optional
 
 from brokers.future_broker import create_broker
-from strategies.ema_trend_strategy import EmaTrendStrategy
+from strategies.strategy_registry import StrategyRegistry
 from risk_management.risk_manager import RiskManager
 from market_data.market_stream import BotEngine
 from database.database import Database
@@ -70,7 +70,7 @@ class TradingBotApp:
         self.broker = create_broker(initial_balance=10_000.0)
         self.broker.connect()
 
-        self.strategy = EmaTrendStrategy()
+        self.strategy = StrategyRegistry.get_strategy(config.ACTIVE_STRATEGY)
         self.risk_manager = RiskManager(self.trade_repo)
 
         self.bot_engine: Optional[BotEngine] = None
