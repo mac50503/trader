@@ -68,6 +68,12 @@ trader/
 ├── tests/
 │   └── test_strategy.py       # pytest unit tests
 │
+├── mql5/                      # MetaTrader 5 Expert Advisors
+│   ├── README.md              # MQL5 setup guide
+│   └── EMA_Pullback_Pro/      # EMA Pullback Pro EA
+│       ├── EMA_Pullback_Pro.mq5
+│       └── README.md
+│
 └── logs/                      # Log files (auto-created)
 ```
 
@@ -245,7 +251,45 @@ Main Thread (Tkinter)
 
 ---
 
-## 🔍 Understanding the Strategy
+## 🤖 MetaTrader 5 Expert Advisors (MQL5)
+
+The same strategies are also available as **MetaTrader 5 Expert Advisors** for trading on any MT5-compatible broker.
+
+### Available EAs
+
+- **EMA Pullback Pro** — Identical logic to the Python strategy
+  - Location: `mql5/EMA_Pullback_Pro/EMA_Pullback_Pro.mq5`
+  - Works on any symbol and timeframe
+  - Same parameters as Python version
+
+### Installation
+
+1. Copy the `.mq5` file to your MT5 `Experts` folder
+2. Compile in MetaEditor (F5)
+3. Attach to a chart
+4. Configure parameters and enable live trading
+
+### Advantages of MQL5 Version
+
+- ✅ Run on any MT5 broker (OANDA, IC Markets, etc.)
+- ✅ Lower latency (EA runs on broker's server)
+- ✅ Automatic data synchronization
+- ✅ Native MT5 alerts and notifications
+- ✅ Backtesting in MT5 Strategy Tester
+
+### Synchronization
+
+Both Python and MQL5 versions use **identical logic**:
+- Same entry/exit conditions
+- Same parameters
+- Same trailing stop calculation
+- Same risk management rules
+
+You can run both simultaneously and compare results.
+
+See `mql5/README.md` for detailed setup instructions.
+
+---
 
 ### Why EMA Pullback?
 The EMA acts as **dynamic support/resistance**. When price pulls back to the EMA and bounces, it's a high-probability entry because:

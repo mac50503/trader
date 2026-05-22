@@ -189,19 +189,19 @@ class BotEngine:
         7. Execute signal
         8. Sleep until next tick
         """
-        logger.info("Bot loop started")
+        logger.info(f"[{self.symbol}] Bot loop started")
 
         # Initial data load
         try:
             self._load_initial_data()
-            logger.info("Initial data loaded successfully")
+            logger.info(f"[{self.symbol}] Initial data loaded successfully")
         except Exception as e:
-            logger.error(f"Failed to load initial data: {e}", exc_info=True)
+            logger.error(f"[{self.symbol}] Failed to load initial data: {e}", exc_info=True)
             self._state = BotState.ERROR
             self._emit("error", {"message": str(e)})
             return
 
-        logger.info("Entering main loop")
+        logger.info(f"[{self.symbol}] Entering main loop")
         while not self._stop_event.is_set():
             # Block here if paused
             if not self._pause_event.is_set():
@@ -213,17 +213,17 @@ class BotEngine:
             try:
                 self._tick()
             except Exception as e:
-                logger.error(f"Error in bot tick: {e}", exc_info=True)
+                logger.error(f"[{self.symbol}] Error in bot tick: {e}", exc_info=True)
                 self._emit("error", {"message": str(e)})
 
             # Sleep between ticks
             self._stop_event.wait(timeout=self.tick_interval)
 
-        logger.info("Bot loop ended")
+        logger.info(f"[{self.symbol}] Bot loop ended")
 
     def _load_initial_data(self) -> None:
         """Load historical candles on startup."""
-        logger.info(f"Loading initial candles: {self.symbol} {self.timeframe}")
+        logger.info(f"[{self.symbol}] Loading initial candles: {self.symbol} {self.timeframe}")
         df = self.broker.get_candles(self.symbol, self.timeframe, count=200)
         self.candle_builder.load_from_broker(df)
         self._emit("data_loaded", {"candles": len(df)})
@@ -235,7 +235,7 @@ class BotEngine:
         # 1. Fetch fresh candles (full buffer — broker returns cached + new ones)
         broker_df = self.broker.get_candles(self.symbol, self.timeframe, count=200)
         if broker_df.empty:
-            logger.debug(f"Tick {self._tick_count}: No candles from broker")
+            logger.debug(f"[{self.symbol}] Tick {self._tick_count}: No candles from broker")
             return
 
         # 2. Get current price
@@ -269,7 +269,7 @@ class BotEngine:
 
             if df is None or not self.candle_builder.is_ready:
                 logger.debug(
-                    f"Candle buffer not ready yet "
+                    f"[{self.symbol}] Candle buffer not ready yet "
                     f"({len(df) if df is not None else 0}/60 candles)"
                 )
                 return
@@ -374,7 +374,7 @@ class BotEngine:
         )
 
         if not allowed:
-            logger.info(f"Trade blocked by risk manager: {reason}")
+            logger.info(f"[{self.symbol}] Trade blocked by risk manager: {reason}")
             self._emit("risk_block", {"reason": reason})
             return
 
@@ -405,7 +405,7 @@ class BotEngine:
         )
 
         if trade is None:
-            logger.error("Order placement failed")
+            logger.error(f"[{self.symbol}] Order placement failed")
             return None
 
         # Save to DB
