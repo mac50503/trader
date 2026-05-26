@@ -191,6 +191,14 @@ class SettingsPanel:
         ).pack(fill=tk.X)
 
         tk.Button(
+            btn_frame, text="🎨 Draw Pattern",
+            bg=T["bg_card"], fg=T["text"],
+            relief=tk.FLAT, cursor="hand2",
+            font=("Segoe UI", 10), pady=6,
+            command=self._draw_pattern,
+        ).pack(fill=tk.X, pady=(4, 0))
+
+        tk.Button(
             btn_frame, text="↺ Reset to Defaults",
             bg=T["bg_card"], fg=T["text_dim"],
             relief=tk.FLAT, cursor="hand2",
@@ -322,3 +330,13 @@ class SettingsPanel:
             self._vars["use_rsi_filter"].set(False)
         if "allow_short" in self._vars:
             self._vars["allow_short"].set(False)
+
+    def _draw_pattern(self) -> None:
+        """Open pattern visualizer window."""
+        from ui.pattern_visualizer import PatternVisualizer
+        
+        strategy_name = self._vars.get("active_strategy", tk.StringVar()).get()
+        if not strategy_name:
+            strategy_name = config.ACTIVE_STRATEGY
+        
+        PatternVisualizer(self.parent.winfo_toplevel(), strategy_name=strategy_name)

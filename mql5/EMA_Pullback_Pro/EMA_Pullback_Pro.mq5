@@ -44,7 +44,7 @@ double         atr_buffer[];
 double         rsi_buffer[];
 
 bool           position_open = false;
-int            position_ticket = 0;
+ulong          position_ticket = 0;
 string         position_direction = "";
 double         position_entry_price = 0.0;
 double         position_stop_loss = 0.0;
@@ -53,17 +53,54 @@ datetime       last_tick_time = 0;
 double         daily_pnl = 0.0;
 bool           daily_loss_triggered = false;
 
+MqlRates       rates[];
+
+//+------------------------------------------------------------------+
+//| Load candle data                                                  |
+//+------------------------------------------------------------------+
+bool UpdateRates(const int candles = 100)
+{
+   ArraySetAsSeries(rates, true);
+   int copied = CopyRates(_Symbol, _Period, 0, candles, rates);
+
+   if(copied <= 0)
+   {
+      Print("[", _Symbol, "] CopyRates failed. Error=", GetLastError());
+      return false;
+   }
+
+   return copied >= MathMin(candles, Bars(_Symbol, _Period));
+}
+
+//+------------------------------------------------------------------+
+//| Normalize volume according to symbol settings                     |
+//+------------------------------------------------------------------+
+double NormalizeVolume(double volume)
+{
+   double min_volume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double max_volume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double step       = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+
+   if(step <= 0.0)
+      step = 0.01;
+
+   volume = MathMax(min_volume, MathMin(volume, max_volume));
+   volume = MathFloor(volume / step) * step;
+
+   return NormalizeDouble(volume, 2);
+}
+
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit() {
     // Create indicator handles
-    ema_fast_handle = iMA(Symbol(), Period(), EMA_FAST, 0, MODE_EMA, PRICE_CLOSE);
-    ema_slow_handle = iMA(Symbol(), Period(), EMA_SLOW, 0, MODE_EMA, PRICE_CLOSE);
-    atr_handle      = iATR(Symbol(), Period(), ATR_PERIOD);
+    ema_fast_handle = iMA(_Symbol, _Period, EMA_FAST, 0, MODE_EMA, PRICE_CLOSE);
+    ema_slow_handle = iMA(_Symbol, _Period, EMA_SLOW, 0, MODE_EMA, PRICE_CLOSE);
+    atr_handle      = iATR(_Symbol, _Period, ATR_PERIOD);
     
     if (USE_RSI_FILTER) {
-        rsi_handle = iRSI(Symbol(), Period(), RSI_PERIOD, PRICE_CLOSE);
+        rsi_handle = iRSI(_Symbol, _Period, RSI_PERIOD, PRICE_CLOSE);
     }
     
     // Validate handles
@@ -74,7 +111,7 @@ int OnInit() {
         return INIT_FAILED;
     }
     
-    Print("[", Symbol(), "] EMA Pullback Pro initialized");
+    Print("[", _Symbol, "] EMA Pullback Pro initialized");
     Print("  EMA_FAST=", EMA_FAST, " EMA_SLOW=", EMA_SLOW);
     Print("  EXIT_PCT=", EXIT_PCT_BELOW_EMA, "% ALLOW_SHORT=", ALLOW_SHORT);
     
@@ -93,13 +130,17 @@ void OnDeinit(const int reason) {
         IndicatorRelease(rsi_handle);
     }
     
-    Print("[", Symbol(), "] EMA Pullback Pro deinitialized");
+    Print("[", _Symbol, "] EMA Pullback Pro deinitialized");
 }
 
 //+------------------------------------------------------------------+
 //| Expert tick function                                             |
 //+------------------------------------------------------------------+
 void OnTick() {
+    // Update rates from broker
+    if(!UpdateRates())
+        return;
+    
     // Rate limiting (optional, for testing)
     if (TimeCurrent() - last_tick_time < TICK_INTERVAL) {
         return;
@@ -112,7 +153,7 @@ void OnTick() {
     }
     
     // Get current price
-    double current_price = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+    double current_price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
     
     // Update trailing stop if position is open
     if (position_open) {
@@ -168,8 +209,8 @@ bool GetIndicatorValues() {
 //| Check Entry Signal                                               |
 //+------------------------------------------------------------------+
 void CheckEntrySignal() {
-    double open_p    = Open[0];
-    double close     = Close[0];
+    double open_p    = rates[0].open;
+    double close     = rates[0].close;
     double ema_fast  = ema_fast_buffer[0];
     double ema_slow  = ema_slow_buffer[0];
     
@@ -190,7 +231,7 @@ void CheckEntrySignal() {
         if (ema_between && bounced) {
             // RSI filter (optional)
             if (USE_RSI_FILTER && rsi_buffer[0] > 70) {
-                Print("[", Symbol(), "] RSI overbought, skip BUY");
+                Print("[", _Symbol, "] RSI overbought, skip BUY");
                 return;
             }
             
@@ -227,7 +268,7 @@ void CheckEntrySignal() {
 //| Check Exit Signal                                                |
 //+------------------------------------------------------------------+
 bool CheckExitSignal() {
-    double close    = Close[0];
+    double close    = rates[0].close;
     double ema_fast = ema_fast_buffer[0];
     double exit_level;
     
@@ -258,9 +299,9 @@ void UpdateTrailingStop(double current_price) {
         if (new_stop > position_stop_loss) {
             // Modify order
             if (ModifyPosition(new_stop)) {
-                Print("[", Symbol(), "] Trailing stop UP: ", 
-                      DoubleToString(position_stop_loss, 5), " → ", 
-                      DoubleToString(new_stop, 5));
+                Print("[", _Symbol, "] Trailing stop UP: ", 
+                      DoubleToString(position_stop_loss, _Digits), " → ", 
+                      DoubleToString(new_stop, _Digits));
                 position_stop_loss = new_stop;
             }
         }
@@ -269,9 +310,9 @@ void UpdateTrailingStop(double current_price) {
         if (new_stop < position_stop_loss) {
             // Modify order
             if (ModifyPosition(new_stop)) {
-                Print("[", Symbol(), "] Trailing stop DOWN: ", 
-                      DoubleToString(position_stop_loss, 5), " → ", 
-                      DoubleToString(new_stop, 5));
+                Print("[", _Symbol, "] Trailing stop DOWN: ", 
+                      DoubleToString(position_stop_loss, _Digits), " → ", 
+                      DoubleToString(new_stop, _Digits));
                 position_stop_loss = new_stop;
             }
         }
@@ -305,37 +346,49 @@ void OpenPosition(string direction, double stop_loss) {
     // Calculate lot size
     double balance = AccountInfoDouble(ACCOUNT_BALANCE);
     double risk_amount = balance * (RISK_PERCENT / 100.0);
-    double stop_distance = MathAbs(Close[0] - stop_loss);
+    double stop_distance = MathAbs(rates[0].close - stop_loss);
     
-    if (stop_distance <= 0) {
-        Print("[", Symbol(), "] Invalid stop distance");
+    if (stop_distance <= 0.0) {
+        Print("[", _Symbol, "] Invalid stop distance");
         return;
     }
     
     double lot_size = risk_amount / stop_distance;
-    lot_size = MathMax(0.01, MathMin(lot_size, 10.0));
-    lot_size = NormalizeDouble(lot_size, 2);
+    lot_size = NormalizeVolume(lot_size);
     
     // Prepare order
-    MqlTradeRequest request = {};
-    MqlTradeResult result = {};
+    MqlTradeRequest request;
+    MqlTradeResult result;
+    ZeroMemory(request);
+    ZeroMemory(result);
     
     request.action = TRADE_ACTION_DEAL;
-    request.symbol = Symbol();
+    request.symbol = _Symbol;
     request.volume = lot_size;
-    request.price = SymbolInfoDouble(Symbol(), SYMBOL_ASK);
-    request.sl = stop_loss;
+    request.sl = NormalizeDouble(stop_loss, _Digits);
+    request.deviation = 20;
     request.comment = "EMA Pullback Pro";
     
     if (direction == "BUY") {
         request.type = ORDER_TYPE_BUY;
+        request.price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     } else {
         request.type = ORDER_TYPE_SELL;
+        request.price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
     }
+    
+    request.price = NormalizeDouble(request.price, _Digits);
     
     // Send order
     if (!OrderSend(request, result)) {
-        Print("[", Symbol(), "] Order failed: ", GetLastError());
+        Print("[", _Symbol, "] OrderSend failed. Error=", GetLastError(),
+              " retcode=", result.retcode);
+        return;
+    }
+    
+    if(result.retcode != TRADE_RETCODE_DONE && result.retcode != TRADE_RETCODE_PLACED)
+    {
+        Print("[", _Symbol, "] Order rejected. Retcode=", result.retcode);
         return;
     }
     
@@ -346,9 +399,9 @@ void OpenPosition(string direction, double stop_loss) {
     position_entry_price = result.price;
     position_stop_loss = stop_loss;
     
-    Print("[", Symbol(), "] ", direction, " opened at ", 
-          DoubleToString(position_entry_price, 5), 
-          " SL=", DoubleToString(stop_loss, 5));
+    Print("[", _Symbol, "] ", direction, " opened at ", 
+          DoubleToString(position_entry_price, _Digits), 
+          " SL=", DoubleToString(stop_loss, _Digits));
 }
 
 //+------------------------------------------------------------------+
@@ -359,27 +412,50 @@ void ClosePosition(string reason) {
         return;
     }
     
-    MqlTradeRequest request = {};
-    MqlTradeResult result = {};
+    if(!PositionSelect(_Symbol))
+    {
+        Print("[", _Symbol, "] No live position found to close");
+        position_open = false;
+        position_ticket = 0;
+        position_direction = "";
+        return;
+    }
+    
+    MqlTradeRequest request;
+    MqlTradeResult result;
+    ZeroMemory(request);
+    ZeroMemory(result);
     
     request.action = TRADE_ACTION_DEAL;
-    request.symbol = Symbol();
+    request.symbol = _Symbol;
+    request.position = (ulong)PositionGetInteger(POSITION_TICKET);
     request.volume = PositionGetDouble(POSITION_VOLUME);
-    request.price = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+    request.deviation = 20;
     request.comment = reason;
     
     if (position_direction == "BUY") {
         request.type = ORDER_TYPE_SELL;
+        request.price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
     } else {
         request.type = ORDER_TYPE_BUY;
+        request.price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     }
     
+    request.price = NormalizeDouble(request.price, _Digits);
+    
     if (!OrderSend(request, result)) {
-        Print("[", Symbol(), "] Close failed: ", GetLastError());
+        Print("[", _Symbol, "] Close failed. Error=", GetLastError(),
+              " retcode=", result.retcode);
         return;
     }
     
-    Print("[", Symbol(), "] ", position_direction, " closed: ", reason);
+    if(result.retcode != TRADE_RETCODE_DONE && result.retcode != TRADE_RETCODE_PLACED)
+    {
+        Print("[", _Symbol, "] Close rejected. Retcode=", result.retcode);
+        return;
+    }
+    
+    Print("[", _Symbol, "] ", position_direction, " closed: ", reason);
     
     position_open = false;
     position_ticket = 0;
@@ -390,16 +466,19 @@ void ClosePosition(string reason) {
 //| Modify Position (Update Stop Loss)                               |
 //+------------------------------------------------------------------+
 bool ModifyPosition(double new_stop) {
-    if (!PositionSelect(Symbol())) {
+    if (!PositionSelect(_Symbol)) {
         return false;
     }
     
-    MqlTradeRequest request = {};
-    MqlTradeResult result = {};
+    MqlTradeRequest request;
+    MqlTradeResult result;
+    ZeroMemory(request);
+    ZeroMemory(result);
     
     request.action = TRADE_ACTION_SLTP;
-    request.symbol = Symbol();
-    request.sl = new_stop;
+    request.symbol = _Symbol;
+    request.position = (ulong)PositionGetInteger(POSITION_TICKET);
+    request.sl = NormalizeDouble(new_stop, _Digits);
     request.tp = PositionGetDouble(POSITION_TP);
     
     return OrderSend(request, result);
@@ -409,13 +488,13 @@ bool ModifyPosition(double new_stop) {
 //| Helper: Get Position Info                                        |
 //+------------------------------------------------------------------+
 bool GetPositionInfo() {
-    if (!PositionSelect(Symbol())) {
+    if (!PositionSelect(_Symbol)) {
         position_open = false;
         return false;
     }
     
     position_open = true;
-    position_ticket = (int)PositionGetTicket(0);
+    position_ticket = (ulong)PositionGetInteger(POSITION_TICKET);
     position_direction = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? "BUY" : "SELL";
     position_entry_price = PositionGetDouble(POSITION_PRICE_OPEN);
     position_stop_loss = PositionGetDouble(POSITION_SL);
