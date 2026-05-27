@@ -1,47 +1,73 @@
 //+------------------------------------------------------------------+
-//| Gann900.mq5 / Change of Direction                                |
-//| Reversal-based strategy using candle patterns and price action    |
+//| Change of Direction.mq5                                          |
+//| Reversal strategy — 4-phase state machine                        |
 //+------------------------------------------------------------------+
 #property strict
-#property version     "1.0"
-#property description "Change of Direction - Reversal EA"
+#property version     "3.0"
+#property description "Change of Direction — Reversal EA"
 #property copyright   "AlgoTrader Pro"
 
 //+------------------------------------------------------------------+
 //| Input Parameters                                                  |
 //+------------------------------------------------------------------+
-
-// Strategy Parameters
-input double   PIP_VALUE              = 0.01;    // Value of 1 pip (e.g., 0.01 for XAUUSD)
-input int      STOP_LOSS_PIPS         = 15;      // Stop loss distance in pips
-input int      TAKE_PROFIT_PIPS       = 45;      // Take profit distance in pips
-input int      MIN_RED_CANDLES        = 2;       // Min consecutive red candles
-input int      MIN_GREEN_CANDLES      = 2;       // Min consecutive green candles
+input int      MIN_RED_CANDLES        = 2;       // Min consecutive red candles (initial drop)
+input int      MIN_GREEN_CANDLES      = 2;       // Min green candles per pullback (not consecutive)
 input bool     ALLOW_SHORT            = true;    // Enable SELL signals
 input bool     ALLOW_LONG             = true;    // Enable BUY signals
-
-// Risk Management
 input double   RISK_PERCENT           = 1.0;     // Risk per trade (%)
 input double   MAX_DAILY_LOSS_PCT     = 30.0;    // Max daily loss (%) - reserved
-input int      MAX_OPEN_POSITIONS     = 1;       // Max concurrent positions - reserved
-
-// Paper Trading Mode
-input bool     PAPER_TRADING_MODE     = true;    // If true: only print signals (no real orders)
+input int      MAX_OPEN_POSITIONS     = 1;       // Max concurrent positions (all broker positions)
+input bool     PAPER_TRADING_MODE     = true;    // true = only print, false = real orders
 
 //+------------------------------------------------------------------+
-//| Global Variables                                                  |
+//| State Machine Phases                                              |
 //+------------------------------------------------------------------+
+#define PHASE_IDLE        0
+#define PHASE1_DROP       1   // consecutive red candles
+#define PHASE2_PULLBACK1  2   // first pullback (greens)
+#define PHASE3_BREAK      3   // waiting for break of point_1
+#define PHASE4_PULLBACK2  4   // second pullback (greens)
+#define PHASE5_ENTRY      5   // waiting for break of point_2
 
-bool           is_position_open = false;
-ulong          current_position_ticket = 0;
-string         current_position_direction = "";
+//+------------------------------------------------------------------+
+//| Global Variables — Position                                       |
+//+------------------------------------------------------------------+
+bool           is_position_open            = false;
+ulong          current_position_ticket     = 0;
+string         current_position_direction  = "";
 double         current_position_entry_price = 0.0;
-double         current_position_stop_loss = 0.0;
+double         current_position_stop_loss  = 0.0;
 double         current_position_take_profit = 0.0;
 
-datetime       last_tick_time = 0;
-double         daily_pnl = 0.0;
-bool           daily_loss_triggered = false;
+//+------------------------------------------------------------------+
+//| Global Variables — SELL state machine                             |
+//+------------------------------------------------------------------+
+int            sell_phase               = PHASE_IDLE;
+double         sell_reset_level         = 0.0;
+double         sell_first_red_open      = 0.0;
+double         sell_point_1             = 0.0;
+int            sell_red_count           = 0;
+int            sell_green1_count        = 0;
+double         sell_pullback1_high      = 0.0;   // max high of first pullback → reset ref for PHASE4/5
+bool           sell_pullback1_exceeded  = false;
+int            sell_green2_count        = 0;
+double         sell_pullback2_high      = 0.0;
+double         sell_point_2             = 0.0;
+
+//+------------------------------------------------------------------+
+//| Global Variables — BUY state machine (mirror)                    |
+//+------------------------------------------------------------------+
+int            buy_phase                = PHASE_IDLE;
+double         buy_reset_level          = 0.0;
+double         buy_first_green_open     = 0.0;
+double         buy_point_1              = 0.0;
+int            buy_green_count          = 0;
+int            buy_red1_count           = 0;
+double         buy_pullback1_low        = 0.0;   // min low of first pullback → reset ref for PHASE4/5
+bool           buy_pullback1_exceeded   = false;
+int            buy_red2_count           = 0;
+double         buy_pullback2_low        = 0.0;
+double         buy_point_2              = 0.0;
 
 MqlRates       rates[];
 
@@ -52,48 +78,74 @@ bool UpdateRates(const int candles = 100)
 {
    ArraySetAsSeries(rates, true);
    int copied = CopyRates(_Symbol, _Period, 0, candles, rates);
-
-   if(copied <= 0)
-   {
-      Print("[", _Symbol, "] CopyRates failed. Error=", GetLastError());
-      return false;
-   }
-
+   if(copied <= 0) { Print("[", _Symbol, "] CopyRates failed. Error=", GetLastError()); return false; }
    return copied >= MathMin(candles, Bars(_Symbol, _Period));
 }
 
 //+------------------------------------------------------------------+
-//| Normalize volume according to symbol settings                     |
+//| Normalize volume                                                  |
 //+------------------------------------------------------------------+
 double NormalizeVolume(double volume)
 {
-   double min_volume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double max_volume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   double step       = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-
-   if(step <= 0.0)
-      step = 0.01;
-
-   volume = MathMax(min_volume, MathMin(volume, max_volume));
+   double min_v = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double max_v = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double step  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(step <= 0.0) step = 0.01;
+   volume = MathMax(min_v, MathMin(volume, max_v));
    volume = MathFloor(volume / step) * step;
-
    return NormalizeDouble(volume, 2);
 }
 
 //+------------------------------------------------------------------+
-//| Expert initialization function                                    |
+//| Reset SELL state                                                  |
+//+------------------------------------------------------------------+
+void ResetSellState()
+{
+   sell_phase              = PHASE_IDLE;
+   sell_reset_level        = 0.0;
+   sell_first_red_open     = 0.0;
+   sell_point_1            = 0.0;
+   sell_red_count          = 0;
+   sell_green1_count       = 0;
+   sell_pullback1_high     = 0.0;
+   sell_pullback1_exceeded = false;
+   sell_green2_count       = 0;
+   sell_pullback2_high     = 0.0;
+   sell_point_2            = 0.0;
+}
+
+//+------------------------------------------------------------------+
+//| Reset BUY state                                                   |
+//+------------------------------------------------------------------+
+void ResetBuyState()
+{
+   buy_phase               = PHASE_IDLE;
+   buy_reset_level         = 0.0;
+   buy_first_green_open    = 0.0;
+   buy_point_1             = 0.0;
+   buy_green_count         = 0;
+   buy_red1_count          = 0;
+   buy_pullback1_low       = 0.0;
+   buy_pullback1_exceeded  = false;
+   buy_red2_count          = 0;
+   buy_pullback2_low       = 0.0;
+   buy_point_2             = 0.0;
+}
+
+//+------------------------------------------------------------------+
+//| OnInit                                                            |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print("[", _Symbol, "] Change of Direction initialized");
-   Print("  SL=", STOP_LOSS_PIPS, " pips, TP=", TAKE_PROFIT_PIPS, " pips");
+   Print("[", _Symbol, "] Change of Direction v3.0 initialized");
+   Print("  MIN_RED=", MIN_RED_CANDLES, " MIN_GREEN=", MIN_GREEN_CANDLES);
    Print("  ALLOW_SHORT=", ALLOW_SHORT, " ALLOW_LONG=", ALLOW_LONG);
-
+   Print("  PAPER_MODE=", PAPER_TRADING_MODE);
    return INIT_SUCCEEDED;
 }
 
 //+------------------------------------------------------------------+
-//| Expert deinitialization function                                  |
+//| OnDeinit                                                          |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
@@ -101,201 +153,360 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Expert tick function                                              |
+//| OnTick — only process on new closed candle                        |
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   if(!UpdateRates())
-      return;
+   if(!UpdateRates()) return;
 
-   double current_bid_price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   static datetime last_candle_time = 0;
+   if(rates[1].time == last_candle_time) return;
+   last_candle_time = rates[1].time;
+
+   MqlRates candle = rates[1];   // last CLOSED candle
 
    if(is_position_open)
-   {
-      if(CheckExitSignal(current_bid_price))
-         return;
-   }
+      CheckExitSignal(candle);
    else
    {
-      CheckEntrySignal();
+      if(ALLOW_SHORT) UpdateSellState(candle);
+      if(ALLOW_LONG)  UpdateBuyState(candle);
    }
 }
 
 //+------------------------------------------------------------------+
-//| Check Entry Signal                                                |
+//| SELL State Machine                                                |
 //+------------------------------------------------------------------+
-void CheckEntrySignal()
+void UpdateSellState(MqlRates &c)
 {
-   if(Bars(_Symbol, _Period) < 10 || ArraySize(rates) < 10)
-      return;
+   bool is_red   = c.close < c.open;
+   bool is_green = c.close > c.open;
 
-   if(ALLOW_SHORT && DetectSellSetup())
-      return;
-
-   if(ALLOW_LONG && DetectBuySetup())
-      return;
-}
-
-//+------------------------------------------------------------------+
-//| Detect SELL Setup                                                 |
-//+------------------------------------------------------------------+
-bool DetectSellSetup()
-{
-   int total_rates = ArraySize(rates);
-   if(total_rates < MIN_RED_CANDLES + 2)
-      return false;
-
-   int consecutive_red_candles = 0;
-
-   for(int i = 1; i < total_rates; i++)
+   // RESET: only in PHASE4/PHASE5 — second pullback must not exceed pullback1_high
+   if((sell_phase == PHASE4_PULLBACK2 || sell_phase == PHASE5_ENTRY) && sell_pullback1_high > 0.0)
    {
-      if(rates[i].close < rates[i].open)
-         consecutive_red_candles++;
-      else
-         break;
+      if(c.close > sell_pullback1_high)
+      {
+         Print("[", _Symbol, "] COD SELL RESET: close=", DoubleToString(c.close, _Digits),
+               " > pullback1_high=", DoubleToString(sell_pullback1_high, _Digits));
+         ResetSellState();
+         return;
+      }
    }
 
-   if(consecutive_red_candles < MIN_RED_CANDLES)
-      return false;
+   // IDLE
+   if(sell_phase == PHASE_IDLE)
+   {
+      if(is_red)
+      {
+         sell_phase          = PHASE1_DROP;
+         sell_reset_level    = c.high;
+         sell_first_red_open = c.open;
+         sell_point_1        = c.low;
+         sell_red_count      = 1;
+         Print("[", _Symbol, "] COD SELL PHASE1: first red. reset=",
+               DoubleToString(sell_reset_level, _Digits),
+               " first_red_open=", DoubleToString(sell_first_red_open, _Digits));
+      }
+      return;
+   }
 
-   int first_red_candle_index = consecutive_red_candles;
-   if(first_red_candle_index >= total_rates)
-      return false;
+   // PHASE 1: consecutive reds
+   if(sell_phase == PHASE1_DROP)
+   {
+      if(is_red)
+      {
+         sell_red_count++;
+         sell_point_1 = MathMin(sell_point_1, c.low);
+         Print("[", _Symbol, "] COD SELL PHASE1: red #", sell_red_count,
+               " point_1=", DoubleToString(sell_point_1, _Digits));
+      }
+      else if(is_green && sell_red_count >= MIN_RED_CANDLES)
+      {
+         sell_phase              = PHASE2_PULLBACK1;
+         sell_green1_count       = 1;
+         sell_pullback1_high     = c.high;   // track max high of first pullback
+         sell_pullback1_exceeded = (c.close > sell_first_red_open);
+         Print("[", _Symbol, "] COD SELL PHASE2: pullback1 started. exceeded=", sell_pullback1_exceeded);
+      }
+      else
+      {
+         Print("[", _Symbol, "] COD SELL RESET PHASE1: green before ",
+               MIN_RED_CANDLES, " reds (", sell_red_count, ")");
+         ResetSellState();
+      }
+      return;
+   }
 
-   double first_red_candle_open = rates[first_red_candle_index].open;
-   double current_candle_close  = rates[0].close;
-   double current_candle_open   = rates[0].open;
+   // PHASE 2: first pullback (greens, not necessarily consecutive)
+   if(sell_phase == PHASE2_PULLBACK1)
+   {
+      if(is_green)
+      {
+         sell_green1_count++;
+         sell_pullback1_high = MathMax(sell_pullback1_high, c.high);   // track max
+         if(c.close > sell_first_red_open) sell_pullback1_exceeded = true;
+         Print("[", _Symbol, "] COD SELL PHASE2: green #", sell_green1_count,
+               " exceeded=", sell_pullback1_exceeded);
+      }
+      else if(is_red)
+      {
+         if(sell_green1_count >= MIN_GREEN_CANDLES && sell_pullback1_exceeded)
+         {
+            sell_phase = PHASE3_BREAK;
+            Print("[", _Symbol, "] COD SELL PHASE3: waiting break of point_1=",
+                  DoubleToString(sell_point_1, _Digits));
+            CheckSellBreak(c);
+         }
+         else
+         {
+            Print("[", _Symbol, "] COD SELL RESET PHASE2: invalid pullback1 (greens=",
+                  sell_green1_count, " exceeded=", sell_pullback1_exceeded, ")");
+            ResetSellState();
+         }
+      }
+      return;
+   }
 
-   if(current_candle_close <= current_candle_open)
-      return false;
+   // PHASE 3: wait for close < point_1
+   if(sell_phase == PHASE3_BREAK)
+   {
+      CheckSellBreak(c);
+      return;
+   }
 
-   if(current_candle_close <= first_red_candle_open)
-      return false;
+   // PHASE 4: second pullback (greens, not necessarily consecutive)
+   if(sell_phase == PHASE4_PULLBACK2)
+   {
+      if(is_green)
+      {
+         sell_green2_count++;
+         sell_pullback2_high = MathMax(sell_pullback2_high, c.high);
+         // point_2 = lowest low of the GREEN pullback candles only
+         if(sell_point_2 == 0.0)
+            sell_point_2 = c.low;
+         else
+            sell_point_2 = MathMin(sell_point_2, c.low);
+         Print("[", _Symbol, "] COD SELL PHASE4: green #", sell_green2_count,
+               " ph2=", DoubleToString(sell_pullback2_high, _Digits),
+               " point_2=", DoubleToString(sell_point_2, _Digits));
+      }
+      else if(is_red)
+      {
+         if(sell_green2_count >= MIN_GREEN_CANDLES)
+         {
+            sell_phase = PHASE5_ENTRY;
+            Print("[", _Symbol, "] COD SELL PHASE5: waiting break of point_2=",
+                  DoubleToString(sell_point_2, _Digits),
+                  " SL=", DoubleToString(sell_pullback2_high, _Digits));
+            CheckSellEntry(c);
+         }
+         // else: keep accumulating greens
+      }
+      return;
+   }
 
-   double point_of_change_direction = current_candle_open;
-   double current_candle_low = rates[0].low;
-
-   if(current_candle_low >= point_of_change_direction)
-      return false;
-
-   double new_point_of_change_direction = current_candle_low;
-
-   if(current_candle_close > new_point_of_change_direction)
-      return false;
-
-   double entry_price = current_candle_close;
-   double stop_loss_price = entry_price + (STOP_LOSS_PIPS * PIP_VALUE);
-   double take_profit_price = entry_price - (TAKE_PROFIT_PIPS * PIP_VALUE);
-
-   Print("[", _Symbol, "] COD SELL: Reversal confirmed. entry=",
-         DoubleToString(entry_price, _Digits),
-         " SL=", DoubleToString(stop_loss_price, _Digits),
-         " TP=", DoubleToString(take_profit_price, _Digits));
-
-   OpenPosition("SELL", stop_loss_price, take_profit_price);
-   return true;
+   // PHASE 5: wait for close <= point_2
+   if(sell_phase == PHASE5_ENTRY)
+      CheckSellEntry(c);
 }
 
 //+------------------------------------------------------------------+
-//| Detect BUY Setup                                                  |
+//| Check SELL break of point_1                                       |
 //+------------------------------------------------------------------+
-bool DetectBuySetup()
+void CheckSellBreak(MqlRates &c)
 {
-   int total_rates = ArraySize(rates);
-   if(total_rates < MIN_GREEN_CANDLES + 2)
-      return false;
-
-   int consecutive_green_candles = 0;
-
-   for(int i = 1; i < total_rates; i++)
+   if(c.close < sell_point_1)
    {
-      if(rates[i].close > rates[i].open)
-         consecutive_green_candles++;
-      else
-         break;
+      sell_phase          = PHASE4_PULLBACK2;
+      sell_green2_count   = 0;
+      sell_pullback2_high = c.high;
+      sell_point_2        = 0.0;   // set by first GREEN candle in PHASE4
+      Print("[", _Symbol, "] COD SELL PHASE4: point_1 broken. close=",
+            DoubleToString(c.close, _Digits),
+            " < point_1=", DoubleToString(sell_point_1, _Digits));
+   }
+   else
+      Print("[", _Symbol, "] COD SELL PHASE3 waiting: close=",
+            DoubleToString(c.close, _Digits),
+            " >= point_1=", DoubleToString(sell_point_1, _Digits));
+}
+
+//+------------------------------------------------------------------+
+//| Check SELL entry                                                  |
+//+------------------------------------------------------------------+
+void CheckSellEntry(MqlRates &c)
+{
+   // point_2 not set yet (no green candle in PHASE4 yet)
+   if(sell_point_2 == 0.0)
+      return;
+
+   if(c.close <= sell_point_2)
+   {
+      double entry_price     = c.close;
+      double stop_loss_price = sell_pullback2_high;
+      double risk            = stop_loss_price - entry_price;
+      double take_profit_price = entry_price - (risk * 2.0);
+
+      Print("[", _Symbol, "] COD SELL ENTRY: close=", DoubleToString(entry_price, _Digits),
+            " <= point_2=", DoubleToString(sell_point_2, _Digits),
+            " SL=", DoubleToString(stop_loss_price, _Digits),
+            " TP=", DoubleToString(take_profit_price, _Digits),
+            " risk=", DoubleToString(risk, _Digits));
+
+      ResetSellState();
+      OpenPosition("SELL", stop_loss_price, take_profit_price);
+   }
+   else
+      Print("[", _Symbol, "] COD SELL PHASE5 waiting: close=",
+            DoubleToString(c.close, _Digits),
+            " > point_2=", DoubleToString(sell_point_2, _Digits));
+}
+
+//+------------------------------------------------------------------+
+//| BUY State Machine (mirror of SELL)                               |
+//+------------------------------------------------------------------+
+void UpdateBuyState(MqlRates &c)
+{
+   bool is_green = c.close > c.open;
+   bool is_red   = c.close < c.open;
+
+   // RESET: only in PHASE4/PHASE5 — second pullback must not go below pullback1_low
+   if((buy_phase == PHASE4_PULLBACK2 || buy_phase == PHASE5_ENTRY) && buy_pullback1_low > 0.0)
+   {
+      if(c.close < buy_pullback1_low)
+      {
+         Print("[", _Symbol, "] COD BUY RESET: close=", DoubleToString(c.close, _Digits),
+               " < pullback1_low=", DoubleToString(buy_pullback1_low, _Digits));
+         ResetBuyState();
+         return;
+      }
    }
 
-   if(consecutive_green_candles < MIN_GREEN_CANDLES)
-      return false;
+   if(buy_phase == PHASE_IDLE)
+   {
+      if(is_green)
+      {
+         buy_phase            = PHASE1_DROP;
+         buy_reset_level      = c.low;
+         buy_first_green_open = c.open;
+         buy_point_1          = c.high;
+         buy_green_count      = 1;
+      }
+      return;
+   }
 
-   int first_green_candle_index = consecutive_green_candles;
-   if(first_green_candle_index >= total_rates)
-      return false;
+   if(buy_phase == PHASE1_DROP)
+   {
+      if(is_green) { buy_green_count++; buy_point_1 = MathMax(buy_point_1, c.high); }
+      else if(is_red && buy_green_count >= MIN_GREEN_CANDLES)
+      {
+         buy_phase              = PHASE2_PULLBACK1;
+         buy_red1_count         = 1;
+         buy_pullback1_low      = c.low;   // track min low of first pullback
+         buy_pullback1_exceeded = (c.close < buy_first_green_open);
+      }
+      else { ResetBuyState(); }
+      return;
+   }
 
-   double first_green_candle_open = rates[first_green_candle_index].open;
-   double current_candle_close    = rates[0].close;
-   double current_candle_open     = rates[0].open;
+   if(buy_phase == PHASE2_PULLBACK1)
+   {
+      if(is_red)
+      {
+         buy_red1_count++;
+         buy_pullback1_low = MathMin(buy_pullback1_low, c.low);   // track min
+         if(c.close < buy_first_green_open) buy_pullback1_exceeded = true;
+      }
+      else if(is_green)
+      {
+         if(buy_red1_count >= MIN_RED_CANDLES && buy_pullback1_exceeded)
+         { buy_phase = PHASE3_BREAK; CheckBuyBreak(c); }
+         else { ResetBuyState(); }
+      }
+      return;
+   }
 
-   if(current_candle_close >= current_candle_open)
-      return false;
+   if(buy_phase == PHASE3_BREAK) { CheckBuyBreak(c); return; }
 
-   if(current_candle_close >= first_green_candle_open)
-      return false;
+   if(buy_phase == PHASE4_PULLBACK2)
+   {
+      if(is_red)
+      {
+         buy_red2_count++;
+         buy_pullback2_low = MathMin(buy_pullback2_low, c.low);
+         // point_2 = highest high of the RED pullback candles only
+         if(buy_point_2 == 0.0)
+            buy_point_2 = c.high;
+         else
+            buy_point_2 = MathMax(buy_point_2, c.high);
+      }
+      else if(is_green && buy_red2_count >= MIN_RED_CANDLES)
+      { buy_phase = PHASE5_ENTRY; CheckBuyEntry(c); }
+      return;
+   }
 
-   double point_of_change_direction = current_candle_open;
-   double current_candle_high = rates[0].high;
+   if(buy_phase == PHASE5_ENTRY) CheckBuyEntry(c);
+}
 
-   if(current_candle_high <= point_of_change_direction)
-      return false;
+void CheckBuyBreak(MqlRates &c)
+{
+   if(c.close > buy_point_1)
+   {
+      buy_phase         = PHASE4_PULLBACK2;
+      buy_red2_count    = 0;
+      buy_pullback2_low = c.low;
+      buy_point_2       = 0.0;   // set by first RED candle in PHASE4
+      Print("[", _Symbol, "] COD BUY PHASE4: point_1 broken. close=",
+            DoubleToString(c.close, _Digits),
+            " > point_1=", DoubleToString(buy_point_1, _Digits));
+   }
+   else
+      Print("[", _Symbol, "] COD BUY PHASE3 waiting: close=",
+            DoubleToString(c.close, _Digits),
+            " <= point_1=", DoubleToString(buy_point_1, _Digits));
+}
 
-   double new_point_of_change_direction = current_candle_high;
+void CheckBuyEntry(MqlRates &c)
+{
+   // point_2 not set yet (no red candle in PHASE4 yet)
+   if(buy_point_2 == 0.0)
+      return;
 
-   if(current_candle_close < new_point_of_change_direction)
-      return false;
+   if(c.close >= buy_point_2)
+   {
+      double entry_price     = c.close;
+      double stop_loss_price = buy_pullback2_low;
+      double risk            = entry_price - stop_loss_price;
+      double take_profit_price = entry_price + (risk * 2.0);
 
-   double entry_price = current_candle_close;
-   double stop_loss_price = entry_price - (STOP_LOSS_PIPS * PIP_VALUE);
-   double take_profit_price = entry_price + (TAKE_PROFIT_PIPS * PIP_VALUE);
+      Print("[", _Symbol, "] COD BUY ENTRY: close=", DoubleToString(entry_price, _Digits),
+            " >= point_2=", DoubleToString(buy_point_2, _Digits),
+            " SL=", DoubleToString(stop_loss_price, _Digits),
+            " TP=", DoubleToString(take_profit_price, _Digits));
 
-   Print("[", _Symbol, "] COD BUY: Reversal confirmed. entry=",
-         DoubleToString(entry_price, _Digits),
-         " SL=", DoubleToString(stop_loss_price, _Digits),
-         " TP=", DoubleToString(take_profit_price, _Digits));
-
-   OpenPosition("BUY", stop_loss_price, take_profit_price);
-   return true;
+      ResetBuyState();
+      OpenPosition("BUY", stop_loss_price, take_profit_price);
+   }
 }
 
 //+------------------------------------------------------------------+
 //| Check Exit Signal                                                 |
 //+------------------------------------------------------------------+
-bool CheckExitSignal(double current_bid_price)
+void CheckExitSignal(MqlRates &c)
 {
-   if(!is_position_open)
-      return false;
-
-   double current_candle_close = rates[0].close;
+   if(!is_position_open) return;
 
    if(current_position_direction == "SELL")
    {
-      if(current_candle_close >= current_position_stop_loss)
-      {
-         ClosePosition("Stop Loss hit");
-         return true;
-      }
-
-      if(current_candle_close <= current_position_take_profit)
-      {
-         ClosePosition("Take Profit hit");
-         return true;
-      }
+      if(c.close >= current_position_stop_loss)  { ClosePosition("Stop Loss hit"); return; }
+      if(c.close <= current_position_take_profit) { ClosePosition("Take Profit hit"); return; }
    }
    else if(current_position_direction == "BUY")
    {
-      if(current_candle_close <= current_position_stop_loss)
-      {
-         ClosePosition("Stop Loss hit");
-         return true;
-      }
-
-      if(current_candle_close >= current_position_take_profit)
-      {
-         ClosePosition("Take Profit hit");
-         return true;
-      }
+      if(c.close <= current_position_stop_loss)  { ClosePosition("Stop Loss hit"); return; }
+      if(c.close >= current_position_take_profit) { ClosePosition("Take Profit hit"); return; }
    }
-
-   return false;
 }
 
 //+------------------------------------------------------------------+
@@ -303,90 +514,68 @@ bool CheckExitSignal(double current_bid_price)
 //+------------------------------------------------------------------+
 void OpenPosition(string direction, double stop_loss_price, double take_profit_price)
 {
-   if(is_position_open)
-      return;
+   if(is_position_open) return;
 
-   double entry_reference_price = rates[0].close;
-   double account_balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double risk_amount = account_balance * (RISK_PERCENT / 100.0);
-   double stop_distance = MathAbs(entry_reference_price - stop_loss_price);
-
-   if(stop_distance <= 0.0)
+   // Check max open positions — counts ALL broker positions
+   if(PositionsTotal() >= MAX_OPEN_POSITIONS)
    {
-      Print("[", _Symbol, "] Invalid stop distance");
+      Print("[", _Symbol, "] Max open positions reached (",
+            PositionsTotal(), "/", MAX_OPEN_POSITIONS, ")");
       return;
    }
 
-   double calculated_lot_size = risk_amount / stop_distance;
-   calculated_lot_size = NormalizeVolume(calculated_lot_size);
+   double entry_ref = rates[1].close;
+   double balance   = AccountInfoDouble(ACCOUNT_BALANCE);
+   double risk_amt  = balance * (RISK_PERCENT / 100.0);
+   double stop_dist = MathAbs(entry_ref - stop_loss_price);
+
+   if(stop_dist <= 0.0) { Print("[", _Symbol, "] Invalid stop distance"); return; }
+
+   double lot_size = NormalizeVolume(risk_amt / stop_dist);
 
    if(PAPER_TRADING_MODE)
    {
       Print("[", _Symbol, "] [PAPER] SIMULATED ", direction, " @ ",
-            DoubleToString(entry_reference_price, _Digits),
-            " lot=", DoubleToString(calculated_lot_size, 2),
+            DoubleToString(entry_ref, _Digits),
+            " lot=", DoubleToString(lot_size, 2),
             " SL=", DoubleToString(stop_loss_price, _Digits),
             " TP=", DoubleToString(take_profit_price, _Digits));
-
-      is_position_open = true;
-      current_position_ticket = 0;
-      current_position_direction = direction;
-      current_position_entry_price = entry_reference_price;
-      current_position_stop_loss = stop_loss_price;
+      is_position_open             = true;
+      current_position_ticket      = 0;
+      current_position_direction   = direction;
+      current_position_entry_price = entry_ref;
+      current_position_stop_loss   = stop_loss_price;
       current_position_take_profit = take_profit_price;
       return;
    }
 
-   MqlTradeRequest trade_request;
-   MqlTradeResult trade_result;
-   ZeroMemory(trade_request);
-   ZeroMemory(trade_result);
+   MqlTradeRequest req; MqlTradeResult res;
+   ZeroMemory(req); ZeroMemory(res);
 
-   trade_request.action = TRADE_ACTION_DEAL;
-   trade_request.symbol = _Symbol;
-   trade_request.volume = calculated_lot_size;
-   trade_request.sl = NormalizeDouble(stop_loss_price, _Digits);
-   trade_request.tp = NormalizeDouble(take_profit_price, _Digits);
-   trade_request.deviation = 20;
-   trade_request.comment = "Change of Direction";
+   req.action    = TRADE_ACTION_DEAL;
+   req.symbol    = _Symbol;
+   req.volume    = lot_size;
+   req.sl        = NormalizeDouble(stop_loss_price, _Digits);
+   req.tp        = NormalizeDouble(take_profit_price, _Digits);
+   req.deviation = 20;
+   req.comment   = "Change of Direction";
 
-   if(direction == "BUY")
-   {
-      trade_request.type = ORDER_TYPE_BUY;
-      trade_request.price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   }
-   else
-   {
-      trade_request.type = ORDER_TYPE_SELL;
-      trade_request.price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   }
+   if(direction == "BUY") { req.type = ORDER_TYPE_BUY;  req.price = SymbolInfoDouble(_Symbol, SYMBOL_ASK); }
+   else                   { req.type = ORDER_TYPE_SELL; req.price = SymbolInfoDouble(_Symbol, SYMBOL_BID); }
+   req.price = NormalizeDouble(req.price, _Digits);
 
-   trade_request.price = NormalizeDouble(trade_request.price, _Digits);
+   if(!OrderSend(req, res)) { Print("[", _Symbol, "] OrderSend failed. Error=", GetLastError(), " retcode=", res.retcode); return; }
+   if(res.retcode != TRADE_RETCODE_DONE && res.retcode != TRADE_RETCODE_PLACED) { Print("[", _Symbol, "] Order rejected. Retcode=", res.retcode); return; }
 
-   if(!OrderSend(trade_request, trade_result))
-   {
-      Print("[", _Symbol, "] OrderSend failed. Error=", GetLastError(),
-            " retcode=", trade_result.retcode);
-      return;
-   }
-
-   if(trade_result.retcode != TRADE_RETCODE_DONE && trade_result.retcode != TRADE_RETCODE_PLACED)
-   {
-      Print("[", _Symbol, "] Order rejected. Retcode=", trade_result.retcode);
-      return;
-   }
-
-   is_position_open = true;
-   current_position_ticket = trade_result.deal;
-   current_position_direction = direction;
-   current_position_entry_price = trade_result.price;
-   current_position_stop_loss = stop_loss_price;
+   is_position_open             = true;
+   current_position_ticket      = res.deal;
+   current_position_direction   = direction;
+   current_position_entry_price = res.price;
+   current_position_stop_loss   = stop_loss_price;
    current_position_take_profit = take_profit_price;
 
-   Print("[", _Symbol, "] ", direction, " opened at ",
-         DoubleToString(current_position_entry_price, _Digits),
-         " SL=", DoubleToString(stop_loss_price, _Digits),
-         " TP=", DoubleToString(take_profit_price, _Digits));
+   Print("[", _Symbol, "] ", direction, " opened at ", DoubleToString(current_position_entry_price, _Digits),
+         " SL=", DoubleToString(stop_loss_price, _Digits), " TP=", DoubleToString(take_profit_price, _Digits));
 }
 
 //+------------------------------------------------------------------+
@@ -394,82 +583,47 @@ void OpenPosition(string direction, double stop_loss_price, double take_profit_p
 //+------------------------------------------------------------------+
 void ClosePosition(string close_reason)
 {
-   if(!is_position_open)
-      return;
+   if(!is_position_open) return;
 
    if(PAPER_TRADING_MODE)
    {
-      double exit_price = rates[0].close;
-      double pnl = 0.0;
-
-      if(current_position_direction == "BUY")
-         pnl = (exit_price - current_position_entry_price) * 100000.0;
-      else
-         pnl = (current_position_entry_price - exit_price) * 100000.0;
-
+      double exit_price = rates[1].close;
+      double pnl = (current_position_direction == "BUY")
+                   ? (exit_price - current_position_entry_price) * 100000.0
+                   : (current_position_entry_price - exit_price) * 100000.0;
       Print("[", _Symbol, "] [PAPER] SIMULATED CLOSE ", current_position_direction,
             " @ ", DoubleToString(exit_price, _Digits),
-            " PnL=", DoubleToString(pnl, 2),
-            " | ", close_reason);
-
-      is_position_open = false;
-      current_position_ticket = 0;
-      current_position_direction = "";
+            " PnL=", DoubleToString(pnl, 2), " | ", close_reason);
+      is_position_open = false; current_position_ticket = 0; current_position_direction = "";
       return;
    }
 
    if(!PositionSelect(_Symbol))
    {
-      Print("[", _Symbol, "] No live position found to close");
-      is_position_open = false;
-      current_position_ticket = 0;
-      current_position_direction = "";
+      Print("[", _Symbol, "] No live position found");
+      is_position_open = false; current_position_ticket = 0; current_position_direction = "";
       return;
    }
 
-   MqlTradeRequest trade_request;
-   MqlTradeResult trade_result;
-   ZeroMemory(trade_request);
-   ZeroMemory(trade_result);
+   MqlTradeRequest req; MqlTradeResult res;
+   ZeroMemory(req); ZeroMemory(res);
 
-   trade_request.action = TRADE_ACTION_DEAL;
-   trade_request.symbol = _Symbol;
-   trade_request.position = (ulong)PositionGetInteger(POSITION_TICKET);
-   trade_request.volume = PositionGetDouble(POSITION_VOLUME);
-   trade_request.deviation = 20;
-   trade_request.comment = close_reason;
+   req.action   = TRADE_ACTION_DEAL;
+   req.symbol   = _Symbol;
+   req.position = (ulong)PositionGetInteger(POSITION_TICKET);
+   req.volume   = PositionGetDouble(POSITION_VOLUME);
+   req.deviation = 20;
+   req.comment  = close_reason;
 
-   if(current_position_direction == "BUY")
-   {
-      trade_request.type = ORDER_TYPE_SELL;
-      trade_request.price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   }
-   else
-   {
-      trade_request.type = ORDER_TYPE_BUY;
-      trade_request.price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   }
+   if(current_position_direction == "BUY") { req.type = ORDER_TYPE_SELL; req.price = SymbolInfoDouble(_Symbol, SYMBOL_BID); }
+   else                                    { req.type = ORDER_TYPE_BUY;  req.price = SymbolInfoDouble(_Symbol, SYMBOL_ASK); }
+   req.price = NormalizeDouble(req.price, _Digits);
 
-   trade_request.price = NormalizeDouble(trade_request.price, _Digits);
-
-   if(!OrderSend(trade_request, trade_result))
-   {
-      Print("[", _Symbol, "] Close failed. Error=", GetLastError(),
-            " retcode=", trade_result.retcode);
-      return;
-   }
-
-   if(trade_result.retcode != TRADE_RETCODE_DONE && trade_result.retcode != TRADE_RETCODE_PLACED)
-   {
-      Print("[", _Symbol, "] Close rejected. Retcode=", trade_result.retcode);
-      return;
-   }
+   if(!OrderSend(req, res)) { Print("[", _Symbol, "] Close failed. Error=", GetLastError(), " retcode=", res.retcode); return; }
+   if(res.retcode != TRADE_RETCODE_DONE && res.retcode != TRADE_RETCODE_PLACED) { Print("[", _Symbol, "] Close rejected. Retcode=", res.retcode); return; }
 
    Print("[", _Symbol, "] ", current_position_direction, " closed: ", close_reason);
-
-   is_position_open = false;
-   current_position_ticket = 0;
-   current_position_direction = "";
+   is_position_open = false; current_position_ticket = 0; current_position_direction = "";
 }
 
 //+------------------------------------------------------------------+

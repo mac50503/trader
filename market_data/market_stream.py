@@ -386,13 +386,14 @@ class BotEngine:
             symbol=self.symbol,
         )
 
-        self._execute_entry(signal.action, lot_size, stop_loss=signal.stop_loss)
+        self._execute_entry(signal.action, lot_size, stop_loss=signal.stop_loss, take_profit=signal.take_profit)
 
     def _execute_entry(
         self,
         direction: str,
         lot_size: float,
         stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
         manual: bool = False,
     ) -> Optional[Trade]:
         """Place order and track the new position."""
@@ -401,6 +402,7 @@ class BotEngine:
             direction=direction,
             lot_size=lot_size,
             stop_loss=stop_loss,
+            take_profit=take_profit,
             comment="manual" if manual else "auto",
         )
 
@@ -408,8 +410,13 @@ class BotEngine:
             logger.error(f"[{self.symbol}] Order placement failed")
             return None
 
-        # Save to DB
+        # Save to DB — this reassigns trade.id to the DB row id
         self.trade_repo.save_trade(trade)
+
+        # Sync the broker's position trade_id to match the DB id
+        # (paper_broker assigns a temp id; save_trade overwrites it with the real DB id)
+        self.broker.sync_position_trade_id(trade)
+
         self.trade_repo.log_event(
             "INFO", "TRADE",
             f"OPEN {direction} {lot_size} {self.symbol} @ {trade.entry_price} SL={stop_loss}",
@@ -425,6 +432,7 @@ class BotEngine:
             lot_size=lot_size,
             entry_time=trade.entry_time,
             stop_loss=stop_loss or 0.0,
+            take_profit=trade.take_profit,
             trade_id=trade.id,
         )
 

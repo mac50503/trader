@@ -21,8 +21,8 @@ input int      ATR_PERIOD            = 14;      // ATR period
 
 // Risk Management
 input double   RISK_PERCENT          = 1.0;     // Risk per trade (%)
-input double   MAX_DAILY_LOSS_PCT    = 3.0;     // Max daily loss (%)
-input int      MAX_OPEN_POSITIONS    = 3;       // Max concurrent positions
+input double   MAX_DAILY_LOSS_PCT    = 3.0;     // Max daily loss (%) - reserved
+input int      MAX_OPEN_POSITIONS    = 3;       // Max concurrent positions (all broker positions)
 
 // Behavior
 input int      TICK_INTERVAL         = 5;       // Seconds between ticks (for testing)
@@ -50,8 +50,6 @@ double         position_entry_price = 0.0;
 double         position_stop_loss = 0.0;
 
 datetime       last_tick_time = 0;
-double         daily_pnl = 0.0;
-bool           daily_loss_triggered = false;
 
 MqlRates       rates[];
 
@@ -342,7 +340,14 @@ void OpenPosition(string direction, double stop_loss) {
     if (position_open) {
         return;  // Already have an open position
     }
-    
+
+    // Check max open positions — counts ALL broker positions
+    if (PositionsTotal() >= MAX_OPEN_POSITIONS) {
+        Print("[", _Symbol, "] Max open positions reached (",
+              PositionsTotal(), "/", MAX_OPEN_POSITIONS, ")");
+        return;
+    }
+
     // Calculate lot size
     double balance = AccountInfoDouble(ACCOUNT_BALANCE);
     double risk_amount = balance * (RISK_PERCENT / 100.0);

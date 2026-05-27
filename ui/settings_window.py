@@ -30,13 +30,15 @@ class SettingsPanel:
         strategy,
         risk_manager: RiskManager,
         theme: dict,
-        get_bot_engine=None,   # callable that returns current BotEngine (or None)
+        get_bot_engine=None,
+        on_strategy_change=None,   # callable(strategy_name) — hot-swaps strategy
     ):
         self.parent = parent
         self.strategy = strategy
         self.risk_manager = risk_manager
         self.theme = theme
         self.get_bot_engine = get_bot_engine or (lambda: None)
+        self.on_strategy_change = on_strategy_change or (lambda name: None)
         self._vars: dict = {}
         self._build()
 
@@ -88,7 +90,7 @@ class SettingsPanel:
         hint_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
         tk.Label(
             hint_frame,
-            text="  • Select which trading strategy to use. Changes take effect on next bot start.",
+            text="  • Strategy changes apply immediately (bot restarts automatically if running).",
             bg=T["bg"], fg=T["text_dim"], font=("Segoe UI", 8), anchor=tk.W,
         ).pack(side=tk.LEFT)
 
@@ -199,6 +201,14 @@ class SettingsPanel:
         ).pack(fill=tk.X, pady=(4, 0))
 
         tk.Button(
+            btn_frame, text="🔍 Scan Patterns",
+            bg=T["bg_card"], fg=T["text"],
+            relief=tk.FLAT, cursor="hand2",
+            font=("Segoe UI", 10), pady=6,
+            command=self._scan_patterns,
+        ).pack(fill=tk.X, pady=(4, 0))
+
+        tk.Button(
             btn_frame, text="↺ Reset to Defaults",
             bg=T["bg_card"], fg=T["text_dim"],
             relief=tk.FLAT, cursor="hand2",
@@ -252,10 +262,11 @@ class SettingsPanel:
     def _apply_settings(self) -> None:
         """Read form values and update strategy + risk manager."""
         try:
-            # Update active strategy (takes effect on next bot start)
+            # Hot-swap strategy — updates self.strategy in app and bot_engine if running
             if "active_strategy" in self._vars:
                 selected_strategy = self._vars["active_strategy"].get()
                 config.ACTIVE_STRATEGY = selected_strategy
+                self.on_strategy_change(selected_strategy)
                 logger.info(f"Active strategy set to: {selected_strategy}")
 
             # Update strategy params
@@ -334,9 +345,43 @@ class SettingsPanel:
     def _draw_pattern(self) -> None:
         """Open pattern visualizer window."""
         from ui.pattern_visualizer import PatternVisualizer
-        
+
         strategy_name = self._vars.get("active_strategy", tk.StringVar()).get()
         if not strategy_name:
             strategy_name = config.ACTIVE_STRATEGY
-        
-        PatternVisualizer(self.parent.winfo_toplevel(), strategy_name=strategy_name)
+
+        # Get the CURRENT live strategy — from bot engine if running,
+        # otherwise fall back to self.strategy (may be stale after hot-swap)
+        bot = self.get_bot_engine()
+        live_strategy = (bot.strategy if bot is not None else None) or self.strategy
+        snapshot = getattr(live_strategy, "last_pattern_snapshot", {})
+
+        # Debug: log what we found
+        import logging
+        logging.getLogger(__name__).info(
+            f"Draw Pattern: strategy={type(live_strategy).__name__} "
+            f"snapshot_keys={list(snapshot.keys())} "
+            f"bot_running={bot is not None}"
+        )
+
+        PatternVisualizer(
+            self.parent.winfo_toplevel(),
+            strategy_name=strategy_name,
+            snapshot=snapshot,
+        )
+
+    def _scan_patterns(self) -> None:
+        """Open pattern scanner — runs strategy over historical candles."""
+        from ui.pattern_scanner import PatternScanner
+
+        strategy_name = self._vars.get("active_strategy", tk.StringVar()).get()
+        if not strategy_name:
+            strategy_name = config.ACTIVE_STRATEGY
+
+        # Get candle data from bot engine if running
+        df = None
+        bot = self.get_bot_engine()
+        if bot is not None and bot.candle_builder.df is not None:
+            df = bot.candle_builder.df.copy()
+
+        PatternScanner(self.parent.winfo_toplevel(), strategy_name=strategy_name, df=df)

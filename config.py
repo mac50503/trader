@@ -36,7 +36,7 @@ DEFAULT_TIMEFRAME: str      = _get("DEFAULT_TIMEFRAME", "M1")
 DEFAULT_RISK_PERCENT: float = _get("DEFAULT_RISK_PERCENT", 1.0, float)
 DEFAULT_LOT_SIZE: float     = _get("DEFAULT_LOT_SIZE", 0.01, float)
 MAX_DAILY_LOSS_PERCENT: float = _get("MAX_DAILY_LOSS_PERCENT", 3.0, float)
-MAX_OPEN_POSITIONS: int     = _get("MAX_OPEN_POSITIONS", 3, int)
+MAX_OPEN_POSITIONS: int     = _get("MAX_OPEN_POSITIONS", 1, int)
 
 # ── Strategy ──────────────────────────────────────────────────────────────────
 ACTIVE_STRATEGY: str           = _get("ACTIVE_STRATEGY", "EMA Pullback Pro")

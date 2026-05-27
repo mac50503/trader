@@ -25,12 +25,13 @@ class PatternVisualizer(tk.Toplevel):
     Toplevel window showing example candle patterns for strategies.
     """
 
-    def __init__(self, parent, strategy_name="Change of Direction"):
+    def __init__(self, parent, strategy_name="Change of Direction", snapshot: dict = None):
         super().__init__(parent)
         self.title(f"Pattern Visualizer — {strategy_name}")
         self.geometry("900x620")
         self.resizable(True, True)
         self.strategy_name = strategy_name
+        self.snapshot = snapshot or {}
 
         self._create_widgets()
 
@@ -114,79 +115,204 @@ class PatternVisualizer(tk.Toplevel):
             self.after(100, self._generate_and_draw_pattern)
             return
 
-        if "Change of Direction" in self.strategy_name:
+        # If we have a real snapshot from the live strategy, use it
+        if self.snapshot and "direction" in self.snapshot:
+            self._draw_from_snapshot(w, h)
+        elif "Change of Direction" in self.strategy_name:
             self._draw_cod_pattern(w, h)
         elif "EMA" in self.strategy_name:
             self._draw_ema_pattern(w, h)
         else:
             self._draw_cod_pattern(w, h)
 
+    # ── Snapshot Drawing ──────────────────────────────────────────────────────
+
+    def _draw_from_snapshot(self, w, h):
+        """Draw the last real detected pattern from the live strategy."""
+        T = self._T
+        s = self.snapshot
+        direction = s["direction"]
+
+        point_1   = s.get("point_1")
+        point_2   = s.get("point_2")
+        entry     = s.get("entry")
+        sl        = s.get("stop_loss")
+        tp        = s.get("take_profit")
+        risk      = s.get("risk", 0)
+
+        if direction == "SELL":
+            pb1_high = s.get("pullback1_high")
+            pb2_high = s.get("pullback2_high")
+
+            # Build synthetic candles that represent the pattern levels
+            candles = [
+                # open,      high,        low,         close,       role
+                (pb1_high,   pb1_high*1.001, point_1*0.999, point_1*1.001, "red1"),
+                (point_1*1.001, point_1*1.002, point_1*0.998, point_1*0.999, "red2"),
+                (point_1*0.999, pb1_high*0.999, point_1*0.998, pb1_high*0.998, "green1_pb1"),
+                (pb1_high*0.998, pb1_high,      point_1*0.999, pb1_high*0.997, "green2_pb1"),
+                (pb1_high*0.997, pb1_high*0.998, point_2*1.001, point_2*1.002, "break"),
+                (point_2*1.002, point_2*1.005,  point_2*0.999, point_2*1.003, "green1_pb2"),
+                (point_2*1.003, point_2*1.006,  point_2*1.001, point_2*1.004, "green2_pb2"),
+                (point_2*1.004, pb2_high,        entry*0.999,   entry,         "entry"),
+            ]
+
+            h_lines = [
+                (point_1,   T["yellow"], f"POINT 1 = {point_1:.2f}",   "dashed"),
+                (pb1_high,  "#888888",   f"pullback1_high = {pb1_high:.2f}", "dotted"),
+                (point_2,   T["orange"], f"POINT 2 = {point_2:.2f}",   "dashed"),
+                (sl,        "#ff6b6b",   f"SL = {sl:.2f}",             "dotted"),
+                (entry,     T["red"],    f"ENTRY = {entry:.2f}",       "solid"),
+                (tp,        T["green"],  f"TP = {tp:.2f}",             "dotted"),
+            ]
+
+            self._draw_candle_chart(candles, w, h, h_lines=h_lines, entry_idx=7, entry_dir="SELL")
+
+            self.info_text.config(state=tk.NORMAL)
+            self.info_text.delete(1.0, tk.END)
+            lines = [
+                ("LAST DETECTED PATTERN — SELL (real data)\n", "header"),
+                ("\n", "value"),
+                (f"POINT 1 = {point_1:.5f}  ", "label"),
+                (f"(lowest low of initial red candles)\n", "value"),
+                (f"pullback1_high = {pb1_high:.5f}  ", "label"),
+                (f"(reset reference for second pullback)\n", "value"),
+                (f"POINT 2 = {point_2:.5f}  ", "label"),
+                (f"(lowest low of second pullback)\n", "value"),
+                (f"ENTRY = {entry:.5f}  SL = {sl:.5f}  TP = {tp:.5f}\n", "ok"),
+                (f"Risk = {risk:.5f}  Reward = {risk*2:.5f}  Ratio = 1:2\n", "value"),
+            ]
+            for text, tag in lines:
+                self.info_text.insert(tk.END, text, tag)
+            self.info_text.config(state=tk.DISABLED)
+
+        else:  # BUY
+            pb1_low  = s.get("pullback1_low")
+            pb2_low  = s.get("pullback2_low")
+
+            candles = [
+                (pb1_low*0.999, point_1*1.001, pb1_low*0.998, point_1*0.999, "green1_pb1"),
+                (point_1*0.999, point_1*1.001, pb1_low*0.999, point_1*1.001, "green2_pb1"),
+                (point_1*1.001, point_1*1.002, pb1_low*1.001, pb1_low*1.002, "break"),
+                (pb1_low*1.002, point_2*0.999, pb1_low*1.001, point_2*0.998, "red1_pb2"),
+                (point_2*0.998, point_2*0.999, pb2_low*1.001, point_2*0.997, "red2_pb2"),
+                (point_2*0.997, entry*1.001,   point_2*0.998, entry,          "entry"),
+            ]
+
+            h_lines = [
+                (point_1,  T["yellow"], f"POINT 1 = {point_1:.2f}",  "dashed"),
+                (pb1_low,  "#888888",   f"pullback1_low = {pb1_low:.2f}", "dotted"),
+                (point_2,  T["orange"], f"POINT 2 = {point_2:.2f}",  "dashed"),
+                (sl,       "#ff6b6b",   f"SL = {sl:.2f}",            "dotted"),
+                (entry,    T["green"],  f"ENTRY = {entry:.2f}",      "solid"),
+                (tp,       T["green"],  f"TP = {tp:.2f}",            "dotted"),
+            ]
+
+            self._draw_candle_chart(candles, w, h, h_lines=h_lines, entry_idx=5, entry_dir="BUY")
+
+            self.info_text.config(state=tk.NORMAL)
+            self.info_text.delete(1.0, tk.END)
+            lines = [
+                ("LAST DETECTED PATTERN — BUY (real data)\n", "header"),
+                ("\n", "value"),
+                (f"POINT 1 = {point_1:.5f}  ", "label"),
+                (f"(highest high of initial green candles)\n", "value"),
+                (f"POINT 2 = {point_2:.5f}  ", "label"),
+                (f"(highest high of second pullback)\n", "value"),
+                (f"ENTRY = {entry:.5f}  SL = {sl:.5f}  TP = {tp:.5f}\n", "ok"),
+                (f"Risk = {risk:.5f}  Reward = {risk*2:.5f}  Ratio = 1:2\n", "value"),
+            ]
+            for text, tag in lines:
+                self.info_text.insert(tk.END, text, tag)
+            self.info_text.config(state=tk.DISABLED)
+
     # ── COD Pattern ───────────────────────────────────────────────────────────
 
     def _draw_cod_pattern(self, w, h):
-        """Draw Change of Direction SELL pattern."""
+        """Draw Change of Direction SELL pattern — 4 phases."""
         T = self._T
         self.canvas.delete("all")
 
-        # ── Candle data: 2 rojas + 1 verde (PCD) + breakout + entry ──────
+        # ── Candle data: 4-phase pattern ─────────────────────────────────
         #
-        #  idx  role           open     high     low      close
-        #   0   context        2332.00  2333.00  2330.50  2331.00  (verde previa)
-        #   1   RED #1         2331.00  2331.50  2328.00  2328.50  ← primera roja
-        #   2   RED #2         2328.50  2329.00  2325.50  2326.00  ← segunda roja
-        #   3   GREEN (PCD)    2326.00  2332.00  2325.50  2331.50  ← verde, PCD = open = 2326.00
-        #   4   breakout       2331.50  2332.00  2323.00  2324.00  ← low < PCD → new_pcd = 2323.00
-        #   5   ENTRY (SELL)   2324.00  2324.50  2321.00  2322.50  ← close <= new_pcd ✓
+        #  idx  role              open     high     low      close
+        #   0   RED #1 (PHASE1)  2335.00  2335.50  2330.00  2330.50  ← first red, reset=2335.50
+        #   1   RED #2 (PHASE1)  2330.50  2331.00  2326.00  2326.50  ← point_1 = 2326.00
+        #   2   GREEN #1 (PH2)   2326.50  2333.00  2326.00  2332.50  ← pullback1, exceeded (2332.50>2335.00? no)
+        #   3   GREEN #2 (PH2)   2332.50  2336.00  2332.00  2335.50  ← pullback1_high=2336, exceeded ✓
+        #   4   RED (PH3)        2335.50  2336.00  2323.00  2323.50  ← close < point_1(2326) → PHASE4
+        #   5   GREEN #1 (PH4)   2323.50  2328.00  2323.00  2327.50  ← pullback2_high=2328, point_2=2323
+        #   6   GREEN #2 (PH4)   2327.50  2329.00  2325.00  2328.50  ← pullback2_high=2329, point_2=2323
+        #   7   RED (PH5)        2328.50  2329.00  2320.00  2321.00  ← close=2321 <= point_2=2323 → SELL
 
         candles = [
             # open,    high,    low,     close,   role
-            (2332.00, 2333.00, 2330.50, 2331.00, "context"),
-            (2331.00, 2331.50, 2328.00, 2328.50, "red1"),
-            (2328.50, 2329.00, 2325.50, 2326.00, "red2"),
-            (2326.00, 2332.00, 2325.50, 2331.50, "green_pcd"),
-            (2331.50, 2332.00, 2323.00, 2324.00, "breakout"),
-            (2324.00, 2324.50, 2321.00, 2322.50, "entry"),
+            (2335.00, 2335.50, 2330.00, 2330.50, "red1"),
+            (2330.50, 2331.00, 2326.00, 2326.50, "red2"),
+            (2326.50, 2333.00, 2326.00, 2332.50, "green1_pb1"),
+            (2332.50, 2336.00, 2332.00, 2335.50, "green2_pb1"),
+            (2335.50, 2336.00, 2323.00, 2323.50, "break"),
+            (2323.50, 2328.00, 2323.00, 2327.50, "green1_pb2"),
+            (2327.50, 2329.00, 2325.00, 2328.50, "green2_pb2"),
+            (2328.50, 2329.00, 2320.00, 2321.00, "entry"),
         ]
 
-        pcd       = 2326.00   # open de la vela verde
-        new_pcd   = 2323.00   # low del breakout
-        entry_px  = 2322.50   # close de la vela de entrada
-        sl_price  = entry_px + 0.15   # +15 pips (0.01 × 15)
-        tp_price  = entry_px - 0.45   # -45 pips
+        point_1          = 2326.00   # low of red candles
+        first_red_open   = 2335.00   # open of first red
+        pullback1_high   = 2336.00   # high of first pullback
+        point_2          = 2323.00   # low of second pullback
+        pullback2_high   = 2329.00   # high of second pullback → SL
+        entry_px         = 2321.00   # close of entry candle
+        sl_price         = pullback2_high
+        tp_price         = entry_px - (sl_price - entry_px) * 2.0
 
         self._draw_candle_chart(
             candles, w, h,
             h_lines=[
-                (pcd,      T["yellow"], "PCD = 2326.00",    "dashed"),
-                (new_pcd,  T["orange"], "New PCD = 2323.00","dashed"),
-                (entry_px, T["red"],    "ENTRY = 2322.50",  "solid"),
-                (sl_price, "#ff6b6b",   f"SL = {sl_price:.2f}", "dotted"),
-                (tp_price, T["green"],  f"TP = {tp_price:.2f}",  "dotted"),
+                (first_red_open, "#aaaaaa",  "open_first_red = 2335.00", "dotted"),
+                (point_1,        T["yellow"], "POINT 1 = 2326.00",        "dashed"),
+                (pullback1_high, "#888888",   "pullback1_high = 2336.00", "dotted"),
+                (point_2,        T["orange"], "POINT 2 = 2323.00",        "dashed"),
+                (sl_price,       "#ff6b6b",   f"SL = {sl_price:.2f}",     "dotted"),
+                (entry_px,       T["red"],    f"ENTRY = {entry_px:.2f}",  "solid"),
+                (tp_price,       T["green"],  f"TP = {tp_price:.2f}",     "dotted"),
             ],
-            entry_idx=5,
+            entry_idx=7,
             entry_dir="SELL",
+            phase_labels=[
+                (0, "PHASE 1\n2 reds"),
+                (2, "PHASE 2\npullback 1"),
+                (4, "PHASE 3\nbreak p1"),
+                (5, "PHASE 4\npullback 2"),
+                (7, "ENTRY\nSELL"),
+            ],
         )
 
-        # ── Info text ─────────────────────────────────────────────────────
         self.info_text.config(state=tk.NORMAL)
         self.info_text.delete(1.0, tk.END)
 
         lines = [
-            ("CHANGE OF DIRECTION — SELL PATTERN\n", "header"),
+            ("CHANGE OF DIRECTION — SELL PATTERN (4 phases)\n", "header"),
             ("\n", "value"),
-            ("① PATTERN RECOGNITION  ", "label"),
-            ("Candles 2-3: 2 RED candles  →  ", "value"),
-            ("Candle 4: GREEN, close(2331.50) > open_first_red(2331.00) ✓\n", "ok"),
-            ("   PCD = open_green = 2326.00\n", "value"),
+            ("① PHASE 1 — Consecutive reds  ", "label"),
+            ("Candles 1-2: 2 consecutive RED  →  ", "value"),
+            ("point_1 = 2326.00 (lowest low)\n", "ok"),
             ("\n", "value"),
-            ("② BREAKOUT CONFIRMATION  ", "label"),
-            ("Candle 5: low(2323.00) < PCD(2326.00) ✓  →  ", "value"),
-            ("New PCD = 2323.00\n", "ok"),
+            ("② PHASE 2 — First pullback  ", "label"),
+            ("Candles 3-4: 2+ greens, close(2335.50) > open_first_red(2335.00) ✓  →  ", "value"),
+            ("pullback1_high = 2336.00\n", "ok"),
             ("\n", "value"),
-            ("③ ENTRY CONFIRMATION  ", "label"),
-            ("Candle 6: close(2322.50) ≤ New PCD(2323.00) ✓  →  ", "value"),
-            ("SELL @ 2322.50\n", "ok"),
-            ("   SL = 2322.50 + 15 pips = 2322.65   |   TP = 2322.50 − 45 pips = 2322.05\n", "value"),
+            ("③ PHASE 3 — Break of point_1  ", "label"),
+            ("Candle 5: close(2323.50) < point_1(2326.00) ✓  →  ", "value"),
+            ("confirmed bearish continuation\n", "ok"),
+            ("\n", "value"),
+            ("④ PHASE 4 — Second pullback  ", "label"),
+            ("Candles 6-7: 2+ greens  →  ", "value"),
+            ("point_2 = 2323.00  |  SL = pullback2_high = 2329.00\n", "ok"),
+            ("\n", "value"),
+            ("⑤ ENTRY  ", "label"),
+            ("Candle 8: close(2321.00) ≤ point_2(2323.00) ✓  →  ", "value"),
+            ("SELL @ 2321.00   SL=2329.00   TP=2305.00   risk=8   reward=16 (1:2)\n", "ok"),
         ]
         for text, tag in lines:
             self.info_text.insert(tk.END, text, tag)
@@ -260,6 +386,7 @@ class PatternVisualizer(tk.Toplevel):
         entry_dir="BUY",
         ema_fast_vals=None,
         ema_slow_vals=None,
+        phase_labels=None,
     ):
         """
         Draw candlesticks + horizontal reference lines + EMA curves.
@@ -423,6 +550,19 @@ class PatternVisualizer(tk.Toplevel):
                 font=("Segoe UI", 10, "bold"),
                 anchor=anchor,
             )
+
+        # ── Phase labels (top of each phase) ─────────────────────────────
+        if phase_labels:
+            for idx, label in phase_labels:
+                x = to_x(idx)
+                self.canvas.create_text(
+                    x, mt + 4,
+                    text=label,
+                    fill=T["yellow"],
+                    font=("Consolas", 7),
+                    anchor=tk.N,
+                    justify=tk.CENTER,
+                )
 
         # ── Legend (top-left) ─────────────────────────────────────────────
         legend_items = [

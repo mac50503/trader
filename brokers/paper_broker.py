@@ -271,10 +271,23 @@ class PaperBroker(BaseBroker):
         exit_price = price or self.get_current_price(trade.symbol)
         trade.close(exit_price, utc_now())
         self._balance += trade.pnl
+
+        before = len(self._positions)
         self._positions = [p for p in self._positions if p.trade_id != trade.id]
+        after = len(self._positions)
+
+        if before == after:
+            # Position not found by trade_id — clear all positions for this symbol
+            # as a safety measure to avoid ghost positions
+            logger.warning(
+                f"[PAPER] close_position: trade_id={trade.id} not found in positions "
+                f"(had {before}). Clearing all positions for {trade.symbol}."
+            )
+            self._positions = [p for p in self._positions if p.symbol != trade.symbol]
+
         logger.info(
             f"[PAPER] Position closed: {trade.symbol} @ {exit_price} "
-            f"PnL={trade.pnl:+.2f}"
+            f"PnL={trade.pnl:+.2f} | positions: {before} → {len(self._positions)}"
         )
         return True
 
@@ -287,6 +300,36 @@ class PaperBroker(BaseBroker):
         logger.debug(f"[PAPER] Stop updated: {trade.symbol} new_stop={new_stop}")
         return True
 
+    def sync_position_trade_id(self, trade: Trade) -> None:
+        """
+        After save_trade() overwrites trade.id with the DB row id,
+        find the position that was created with the old temp id and
+        update it to the real DB id so close_position() can find it.
+        """
+        # The position was created with the old _trade_counter id.
+        # We find it by matching symbol + direction + entry_price since
+        # the trade_id may have changed.
+        for pos in self._positions:
+            if (
+                pos.symbol == trade.symbol
+                and pos.direction == trade.direction
+                and abs(pos.entry_price - trade.entry_price) < 0.001
+                and pos.trade_id != trade.id
+            ):
+                logger.debug(
+                    f"[PAPER] Syncing position trade_id: "
+                    f"{pos.trade_id} → {trade.id} ({trade.symbol})"
+                )
+                pos.trade_id = trade.id
+                break
+
     def get_open_positions(self) -> List[Position]:
         return list(self._positions)
+
+    def clear_all_positions(self) -> None:
+        """Emergency clear — removes all tracked positions."""
+        count = len(self._positions)
+        self._positions = []
+        if count:
+            logger.warning(f"[PAPER] Cleared {count} ghost position(s)")
 

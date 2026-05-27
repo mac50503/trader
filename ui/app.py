@@ -390,6 +390,7 @@ class TradingBotApp:
         self.settings_panel = SettingsPanel(
             settings_frame, self.strategy, self.risk_manager, THEME,
             get_bot_engine=lambda: self.bot_engine,
+            on_strategy_change=self._swap_strategy,
         )
 
         # Redraw chart when tab is selected
@@ -594,6 +595,20 @@ class TradingBotApp:
         self.root.after(10_000, self._schedule_ui_refresh)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    def _swap_strategy(self, strategy_name: str) -> None:
+        """
+        Hot-swap the active strategy without restarting the app.
+        Updates self.strategy and the running bot_engine if active.
+        """
+        new_strategy = StrategyRegistry.get_strategy(strategy_name)
+        self.strategy = new_strategy
+
+        if self.bot_engine is not None:
+            self.bot_engine.strategy = new_strategy
+            logger.info(f"Strategy hot-swapped to: {strategy_name}")
+        else:
+            logger.info(f"Strategy set to: {strategy_name} (takes effect on next start)")
 
     def _on_close(self) -> None:
         """Clean shutdown when window is closed."""

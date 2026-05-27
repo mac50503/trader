@@ -25,6 +25,7 @@ class Position:
     # Updated in real-time
     current_price: float = 0.0
     trailing_stop: Optional[float] = None
+    take_profit: Optional[float] = None
     trade_id: Optional[int] = None   # FK to Trade in DB
 
     @property

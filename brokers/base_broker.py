@@ -127,6 +127,14 @@ class BaseBroker(ABC):
         """
         ...
 
+    def sync_position_trade_id(self, trade: Trade) -> None:
+        """
+        After save_trade() reassigns trade.id to the DB row id,
+        update the corresponding position's trade_id to match.
+        Default implementation is a no-op (only needed for paper broker).
+        """
+        pass
+
     # ── Positions ─────────────────────────────────────────────────────────────
 
     @abstractmethod
