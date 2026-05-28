@@ -54,12 +54,10 @@ double         current_position_take_profit = 0.0;
 //+------------------------------------------------------------------+
 int            sell_phase               = PHASE_IDLE;
 double         sell_reset_level         = 0.0;
-double         sell_first_red_open      = 0.0;
 double         sell_point_1             = 0.0;
 int            sell_red_count           = 0;
 int            sell_green1_count        = 0;
 double         sell_pullback1_high      = 0.0;
-bool           sell_pullback1_exceeded  = false;
 int            sell_green2_count        = 0;
 double         sell_pullback2_high      = 0.0;
 double         sell_point_2             = 0.0;
@@ -69,12 +67,10 @@ double         sell_point_2             = 0.0;
 //+------------------------------------------------------------------+
 int            buy_phase                = PHASE_IDLE;
 double         buy_reset_level          = 0.0;
-double         buy_first_green_open     = 0.0;
 double         buy_point_1              = 0.0;
 int            buy_green_count          = 0;
 int            buy_red1_count           = 0;
 double         buy_pullback1_low        = 0.0;
-bool           buy_pullback1_exceeded   = false;
 int            buy_red2_count           = 0;
 double         buy_pullback2_low        = 0.0;
 double         buy_point_2              = 0.0;
@@ -113,12 +109,10 @@ void ResetSellState()
 {
    sell_phase              = PHASE_IDLE;
    sell_reset_level        = 0.0;
-   sell_first_red_open     = 0.0;
    sell_point_1            = 0.0;
    sell_red_count          = 0;
    sell_green1_count       = 0;
    sell_pullback1_high     = 0.0;
-   sell_pullback1_exceeded = false;
    sell_green2_count       = 0;
    sell_pullback2_high     = 0.0;
    sell_point_2            = 0.0;
@@ -131,12 +125,10 @@ void ResetBuyState()
 {
    buy_phase               = PHASE_IDLE;
    buy_reset_level         = 0.0;
-   buy_first_green_open    = 0.0;
    buy_point_1             = 0.0;
    buy_green_count         = 0;
    buy_red1_count          = 0;
    buy_pullback1_low       = 0.0;
-   buy_pullback1_exceeded  = false;
    buy_red2_count          = 0;
    buy_pullback2_low       = 0.0;
    buy_point_2             = 0.0;
@@ -209,11 +201,10 @@ void UpdateSellState(MqlRates &c)
       {
          sell_phase          = PHASE1_DROP;
          sell_reset_level    = c.high;
-         sell_first_red_open = c.open;
          sell_point_1        = c.low;
          sell_red_count      = 1;
-         Log("[" + _Symbol + "] COD SELL PHASE1: first red. first_red_open="
-             + DoubleToString(sell_first_red_open, _Digits));
+         Log("[" + _Symbol + "] COD SELL PHASE1: first red. point_1="
+             + DoubleToString(sell_point_1, _Digits));
       }
       return;
    }
@@ -232,9 +223,7 @@ void UpdateSellState(MqlRates &c)
          sell_phase              = PHASE2_PULLBACK1;
          sell_green1_count       = 1;
          sell_pullback1_high     = c.high;
-         sell_pullback1_exceeded = (c.close > sell_first_red_open);
-         Log("[" + _Symbol + "] COD SELL PHASE2: pullback1 started. exceeded="
-             + (string)sell_pullback1_exceeded);
+         Log("[" + _Symbol + "] COD SELL PHASE2: pullback1 started.");
       }
       else
       {
@@ -249,15 +238,22 @@ void UpdateSellState(MqlRates &c)
    {
       if(is_green)
       {
+         // Validate: green must NOT make new low below point_1
+         if(c.low < sell_point_1)
+         {
+            Log("[" + _Symbol + "] COD SELL RESET PHASE2: green low below point_1 ("
+                + DoubleToString(c.low, _Digits) + " < " + DoubleToString(sell_point_1, _Digits) + ")");
+            ResetSellState();
+            return;
+         }
          sell_green1_count++;
          sell_pullback1_high = MathMax(sell_pullback1_high, c.high);
-         if(c.close > sell_first_red_open) sell_pullback1_exceeded = true;
          Log("[" + _Symbol + "] COD SELL PHASE2: green #" + IntegerToString(sell_green1_count)
-             + " exceeded=" + (string)sell_pullback1_exceeded);
+             + " ph1=" + DoubleToString(sell_pullback1_high, _Digits));
       }
       else if(is_red)
       {
-         if(sell_green1_count >= MIN_GREEN_CANDLES && sell_pullback1_exceeded)
+         if(sell_green1_count >= MIN_GREEN_CANDLES)
          {
             sell_phase = PHASE3_BREAK;
             Log("[" + _Symbol + "] COD SELL PHASE3: waiting break of point_1="
@@ -267,8 +263,8 @@ void UpdateSellState(MqlRates &c)
          }
          else
          {
-            Log("[" + _Symbol + "] COD SELL RESET PHASE2: invalid pullback1 (greens="
-                + IntegerToString(sell_green1_count) + " exceeded=" + (string)sell_pullback1_exceeded + ")");
+            Log("[" + _Symbol + "] COD SELL RESET PHASE2: not enough greens ("
+                + IntegerToString(sell_green1_count) + "/" + IntegerToString(MIN_GREEN_CANDLES) + ")");
             ResetSellState();
          }
       }
@@ -382,7 +378,6 @@ void UpdateBuyState(MqlRates &c)
       {
          buy_phase            = PHASE1_DROP;
          buy_reset_level      = c.low;
-         buy_first_green_open = c.open;
          buy_point_1          = c.high;
          buy_green_count      = 1;
       }
@@ -397,9 +392,7 @@ void UpdateBuyState(MqlRates &c)
          buy_phase              = PHASE2_PULLBACK1;
          buy_red1_count         = 1;
          buy_pullback1_low      = c.low;
-         buy_pullback1_exceeded = (c.close < buy_first_green_open);
-         Log("[" + _Symbol + "] COD BUY PHASE2: pullback1 started. exceeded="
-             + (string)buy_pullback1_exceeded);
+         Log("[" + _Symbol + "] COD BUY PHASE2: pullback1 started.");
       }
       else
       {
@@ -414,15 +407,22 @@ void UpdateBuyState(MqlRates &c)
    {
       if(is_red)
       {
+         // Validate: red must NOT make new high above point_1
+         if(c.high > buy_point_1)
+         {
+            Log("[" + _Symbol + "] COD BUY RESET PHASE2: red high above point_1 ("
+                + DoubleToString(c.high, _Digits) + " > " + DoubleToString(buy_point_1, _Digits) + ")");
+            ResetBuyState();
+            return;
+         }
          buy_red1_count++;
          buy_pullback1_low = MathMin(buy_pullback1_low, c.low);
-         if(c.close < buy_first_green_open) buy_pullback1_exceeded = true;
          Log("[" + _Symbol + "] COD BUY PHASE2: red #" + IntegerToString(buy_red1_count)
-             + " exceeded=" + (string)buy_pullback1_exceeded);
+             + " pullback1_low=" + DoubleToString(buy_pullback1_low, _Digits));
       }
       else if(is_green)
       {
-         if(buy_red1_count >= MIN_RED_CANDLES && buy_pullback1_exceeded)
+         if(buy_red1_count >= MIN_RED_CANDLES)
          {
             buy_phase = PHASE3_BREAK;
             Log("[" + _Symbol + "] COD BUY PHASE3: waiting break of point_1="
@@ -431,8 +431,8 @@ void UpdateBuyState(MqlRates &c)
          }
          else
          {
-            Log("[" + _Symbol + "] COD BUY RESET PHASE2: invalid pullback1 (reds="
-                + IntegerToString(buy_red1_count) + " exceeded=" + (string)buy_pullback1_exceeded + ")");
+            Log("[" + _Symbol + "] COD BUY RESET PHASE2: not enough reds ("
+                + IntegerToString(buy_red1_count) + "/" + IntegerToString(MIN_RED_CANDLES) + ")");
             ResetBuyState();
          }
       }

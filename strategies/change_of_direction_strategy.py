@@ -151,13 +151,10 @@ class ChangeOfDirectionStrategy(BaseStrategy):
         if self._sell_phase == _IDLE:
             if is_red:
                 self._sell_phase         = _PHASE1_DROP
-                self._sell_reset_level   = h        # high of first red → reset trigger
-                self._sell_first_red_open = o       # open of first red → pullback reference
                 self._sell_point_1       = l        # lowest low so far
                 self._sell_red_count     = 1
                 logger.debug(
-                    f"COD SELL PHASE1: first red. reset={h:.5f} "
-                    f"first_red_open={o:.5f}"
+                    f"COD SELL PHASE1: first red. point_1={l:.5f}"
                 )
             return None
 
@@ -174,11 +171,9 @@ class ChangeOfDirectionStrategy(BaseStrategy):
                 # Enough consecutive reds → start first pullback
                 self._sell_phase              = _PHASE2_PULLBACK1
                 self._sell_green1_count       = 1
-                self._sell_pullback1_high     = h   # track max high of first pullback
-                self._sell_pullback1_exceeded = (c > self._sell_first_red_open)
+                self._sell_pullback1_high     = h
                 logger.debug(
-                    f"COD SELL PHASE2: first pullback started. "
-                    f"exceeded={self._sell_pullback1_exceeded}"
+                    f"COD SELL PHASE2: first pullback started."
                 )
             else:
                 # Green before enough reds → reset
@@ -193,19 +188,22 @@ class ChangeOfDirectionStrategy(BaseStrategy):
         # ── PHASE 2: first pullback (greens, not necessarily consecutive) ─
         if self._sell_phase == _PHASE2_PULLBACK1:
             if is_green:
+                # Validate: green candle must NOT make a new low below point_1
+                if l < self._sell_point_1:
+                    logger.info(
+                        f"COD SELL RESET PHASE2: green made new low below point_1 "
+                        f"(low={l:.5f} < point_1={self._sell_point_1:.5f})"
+                    )
+                    self._reset_sell_state()
+                    return None
                 self._sell_green1_count += 1
-                self._sell_pullback1_high = max(self._sell_pullback1_high, h)  # track max
-                if c > self._sell_first_red_open:
-                    self._sell_pullback1_exceeded = True
+                self._sell_pullback1_high = max(self._sell_pullback1_high, h)
                 logger.debug(
                     f"COD SELL PHASE2: green #{self._sell_green1_count} "
-                    f"exceeded={self._sell_pullback1_exceeded}"
+                    f"ph1={self._sell_pullback1_high:.5f}"
                 )
             elif is_red:
-                if (
-                    self._sell_green1_count >= self.params["min_green_candles"]
-                    and self._sell_pullback1_exceeded
-                ):
+                if self._sell_green1_count >= self.params["min_green_candles"]:
                     # Valid first pullback → wait for break of point_1
                     self._sell_phase = _PHASE3_BREAK
                     logger.info(
@@ -217,10 +215,8 @@ class ChangeOfDirectionStrategy(BaseStrategy):
                     return self._check_sell_break(candle)
                 else:
                     logger.info(
-                        f"COD SELL RESET PHASE2: invalid pullback "
-                        f"(greens={self._sell_green1_count}/{self.params['min_green_candles']} "
-                        f"exceeded={self._sell_pullback1_exceeded} "
-                        f"first_red_open={self._sell_first_red_open:.5f} close={c:.5f})"
+                        f"COD SELL RESET PHASE2: not enough greens "
+                        f"({self._sell_green1_count}/{self.params['min_green_candles']})"
                     )
                     self._reset_sell_state()
             return None
@@ -344,12 +340,10 @@ class ChangeOfDirectionStrategy(BaseStrategy):
 
     def _reset_sell_state(self):
         self._sell_phase              = _IDLE
-        self._sell_first_red_open     = None
         self._sell_point_1            = None
         self._sell_red_count          = 0
         self._sell_green1_count       = 0
         self._sell_pullback1_high     = None
-        self._sell_pullback1_exceeded = False
         self._sell_green2_count       = 0
         self._sell_pullback2_high     = None
         self._sell_point_2            = None
@@ -378,8 +372,6 @@ class ChangeOfDirectionStrategy(BaseStrategy):
         if self._buy_phase == _IDLE:
             if is_green:
                 self._buy_phase            = _PHASE1_DROP
-                self._buy_reset_level      = l
-                self._buy_first_green_open = o
                 self._buy_point_1          = h
                 self._buy_green_count      = 1
             return None
@@ -392,8 +384,7 @@ class ChangeOfDirectionStrategy(BaseStrategy):
             elif is_red and self._buy_green_count >= self.params["min_green_candles"]:
                 self._buy_phase              = _PHASE2_PULLBACK1
                 self._buy_red1_count         = 1
-                self._buy_pullback1_low      = l   # track min low of first pullback
-                self._buy_pullback1_exceeded = (c < self._buy_first_green_open)
+                self._buy_pullback1_low      = l
             else:
                 self._reset_buy_state()
             return None
@@ -401,15 +392,18 @@ class ChangeOfDirectionStrategy(BaseStrategy):
         # ── PHASE 2: first pullback (reds, not necessarily consecutive) ───
         if self._buy_phase == _PHASE2_PULLBACK1:
             if is_red:
+                # Validate: red candle must NOT make a new high above point_1
+                if h > self._buy_point_1:
+                    logger.debug(
+                        f"COD BUY RESET PHASE2: red made new high above point_1 "
+                        f"(high={h:.5f} > point_1={self._buy_point_1:.5f})"
+                    )
+                    self._reset_buy_state()
+                    return None
                 self._buy_red1_count += 1
-                self._buy_pullback1_low = min(self._buy_pullback1_low, l)  # track min
-                if c < self._buy_first_green_open:
-                    self._buy_pullback1_exceeded = True
+                self._buy_pullback1_low = min(self._buy_pullback1_low, l)
             elif is_green:
-                if (
-                    self._buy_red1_count >= self.params["min_red_candles"]
-                    and self._buy_pullback1_exceeded
-                ):
+                if self._buy_red1_count >= self.params["min_red_candles"]:
                     self._buy_phase = _PHASE3_BREAK
                     return self._check_buy_break(candle)
                 else:
@@ -510,12 +504,10 @@ class ChangeOfDirectionStrategy(BaseStrategy):
 
     def _reset_buy_state(self):
         self._buy_phase              = _IDLE
-        self._buy_first_green_open   = None
         self._buy_point_1            = None
         self._buy_green_count        = 0
         self._buy_red1_count         = 0
         self._buy_pullback1_low      = None
-        self._buy_pullback1_exceeded = False
         self._buy_red2_count         = 0
         self._buy_pullback2_low      = None
         self._buy_point_2            = None
