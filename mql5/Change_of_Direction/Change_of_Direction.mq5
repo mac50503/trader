@@ -17,17 +17,27 @@ input bool     ALLOW_LONG             = true;    // Enable BUY signals
 input double   RISK_PERCENT           = 1.0;     // Risk per trade (%)
 input double   MAX_DAILY_LOSS_PCT     = 30.0;    // Max daily loss (%) - reserved
 input int      MAX_OPEN_POSITIONS     = 1;       // Max concurrent positions (all broker positions)
-input bool     PAPER_TRADING_MODE     = true;    // true = only print, false = real orders
+input bool     PAPER_TRADING_MODE     = false;  // true = only print, false = real orders
+input bool     DEBUG_LOGS             = false;   // true = print all phase transitions, false = silent
+
+//+------------------------------------------------------------------+
+//| Logging helper — only prints when DEBUG_LOGS is true             |
+//+------------------------------------------------------------------+
+void Log(string message)
+{
+   if(DEBUG_LOGS)
+      Print(message);
+}
 
 //+------------------------------------------------------------------+
 //| State Machine Phases                                              |
 //+------------------------------------------------------------------+
 #define PHASE_IDLE        0
-#define PHASE1_DROP       1   // consecutive red candles
-#define PHASE2_PULLBACK1  2   // first pullback (greens)
-#define PHASE3_BREAK      3   // waiting for break of point_1
-#define PHASE4_PULLBACK2  4   // second pullback (greens)
-#define PHASE5_ENTRY      5   // waiting for break of point_2
+#define PHASE1_DROP       1
+#define PHASE2_PULLBACK1  2
+#define PHASE3_BREAK      3
+#define PHASE4_PULLBACK2  4
+#define PHASE5_ENTRY      5
 
 //+------------------------------------------------------------------+
 //| Global Variables — Position                                       |
@@ -48,7 +58,7 @@ double         sell_first_red_open      = 0.0;
 double         sell_point_1             = 0.0;
 int            sell_red_count           = 0;
 int            sell_green1_count        = 0;
-double         sell_pullback1_high      = 0.0;   // max high of first pullback → reset ref for PHASE4/5
+double         sell_pullback1_high      = 0.0;
 bool           sell_pullback1_exceeded  = false;
 int            sell_green2_count        = 0;
 double         sell_pullback2_high      = 0.0;
@@ -63,7 +73,7 @@ double         buy_first_green_open     = 0.0;
 double         buy_point_1              = 0.0;
 int            buy_green_count          = 0;
 int            buy_red1_count           = 0;
-double         buy_pullback1_low        = 0.0;   // min low of first pullback → reset ref for PHASE4/5
+double         buy_pullback1_low        = 0.0;
 bool           buy_pullback1_exceeded   = false;
 int            buy_red2_count           = 0;
 double         buy_pullback2_low        = 0.0;
@@ -137,10 +147,9 @@ void ResetBuyState()
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print("[", _Symbol, "] Change of Direction v3.0 initialized");
-   Print("  MIN_RED=", MIN_RED_CANDLES, " MIN_GREEN=", MIN_GREEN_CANDLES);
-   Print("  ALLOW_SHORT=", ALLOW_SHORT, " ALLOW_LONG=", ALLOW_LONG);
-   Print("  PAPER_MODE=", PAPER_TRADING_MODE);
+   Log("[" + _Symbol + "] Change of Direction v3.0 initialized | MIN_RED=" + IntegerToString(MIN_RED_CANDLES)
+       + " MIN_GREEN=" + IntegerToString(MIN_GREEN_CANDLES)
+       + " PAPER=" + (string)PAPER_TRADING_MODE + " DEBUG=" + (string)DEBUG_LOGS);
    return INIT_SUCCEEDED;
 }
 
@@ -149,7 +158,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Print("[", _Symbol, "] Change of Direction deinitialized. Reason=", reason);
+   Log("[" + _Symbol + "] Change of Direction deinitialized. Reason=" + IntegerToString(reason));
 }
 
 //+------------------------------------------------------------------+
@@ -163,7 +172,7 @@ void OnTick()
    if(rates[1].time == last_candle_time) return;
    last_candle_time = rates[1].time;
 
-   MqlRates candle = rates[1];   // last CLOSED candle
+   MqlRates candle = rates[1];
 
    if(is_position_open)
       CheckExitSignal(candle);
@@ -182,19 +191,18 @@ void UpdateSellState(MqlRates &c)
    bool is_red   = c.close < c.open;
    bool is_green = c.close > c.open;
 
-   // RESET: only in PHASE4/PHASE5 — second pullback must not exceed pullback1_high
+   // RESET: only in PHASE4/PHASE5
    if((sell_phase == PHASE4_PULLBACK2 || sell_phase == PHASE5_ENTRY) && sell_pullback1_high > 0.0)
    {
       if(c.close > sell_pullback1_high)
       {
-         Print("[", _Symbol, "] COD SELL RESET: close=", DoubleToString(c.close, _Digits),
-               " > pullback1_high=", DoubleToString(sell_pullback1_high, _Digits));
+         Log("[" + _Symbol + "] COD SELL RESET: close=" + DoubleToString(c.close, _Digits)
+             + " > pullback1_high=" + DoubleToString(sell_pullback1_high, _Digits));
          ResetSellState();
          return;
       }
    }
 
-   // IDLE
    if(sell_phase == PHASE_IDLE)
    {
       if(is_red)
@@ -204,111 +212,98 @@ void UpdateSellState(MqlRates &c)
          sell_first_red_open = c.open;
          sell_point_1        = c.low;
          sell_red_count      = 1;
-         Print("[", _Symbol, "] COD SELL PHASE1: first red. reset=",
-               DoubleToString(sell_reset_level, _Digits),
-               " first_red_open=", DoubleToString(sell_first_red_open, _Digits));
+         Log("[" + _Symbol + "] COD SELL PHASE1: first red. first_red_open="
+             + DoubleToString(sell_first_red_open, _Digits));
       }
       return;
    }
 
-   // PHASE 1: consecutive reds
    if(sell_phase == PHASE1_DROP)
    {
       if(is_red)
       {
          sell_red_count++;
          sell_point_1 = MathMin(sell_point_1, c.low);
-         Print("[", _Symbol, "] COD SELL PHASE1: red #", sell_red_count,
-               " point_1=", DoubleToString(sell_point_1, _Digits));
+         Log("[" + _Symbol + "] COD SELL PHASE1: red #" + IntegerToString(sell_red_count)
+             + " point_1=" + DoubleToString(sell_point_1, _Digits));
       }
       else if(is_green && sell_red_count >= MIN_RED_CANDLES)
       {
          sell_phase              = PHASE2_PULLBACK1;
          sell_green1_count       = 1;
-         sell_pullback1_high     = c.high;   // track max high of first pullback
+         sell_pullback1_high     = c.high;
          sell_pullback1_exceeded = (c.close > sell_first_red_open);
-         Print("[", _Symbol, "] COD SELL PHASE2: pullback1 started. exceeded=", sell_pullback1_exceeded);
+         Log("[" + _Symbol + "] COD SELL PHASE2: pullback1 started. exceeded="
+             + (string)sell_pullback1_exceeded);
       }
       else
       {
-         Print("[", _Symbol, "] COD SELL RESET PHASE1: green before ",
-               MIN_RED_CANDLES, " reds (", sell_red_count, ")");
+         Log("[" + _Symbol + "] COD SELL RESET PHASE1: green before "
+             + IntegerToString(MIN_RED_CANDLES) + " reds (" + IntegerToString(sell_red_count) + ")");
          ResetSellState();
       }
       return;
    }
 
-   // PHASE 2: first pullback (greens, not necessarily consecutive)
    if(sell_phase == PHASE2_PULLBACK1)
    {
       if(is_green)
       {
          sell_green1_count++;
-         sell_pullback1_high = MathMax(sell_pullback1_high, c.high);   // track max
+         sell_pullback1_high = MathMax(sell_pullback1_high, c.high);
          if(c.close > sell_first_red_open) sell_pullback1_exceeded = true;
-         Print("[", _Symbol, "] COD SELL PHASE2: green #", sell_green1_count,
-               " exceeded=", sell_pullback1_exceeded);
+         Log("[" + _Symbol + "] COD SELL PHASE2: green #" + IntegerToString(sell_green1_count)
+             + " exceeded=" + (string)sell_pullback1_exceeded);
       }
       else if(is_red)
       {
          if(sell_green1_count >= MIN_GREEN_CANDLES && sell_pullback1_exceeded)
          {
             sell_phase = PHASE3_BREAK;
-            Print("[", _Symbol, "] COD SELL PHASE3: waiting break of point_1=",
-                  DoubleToString(sell_point_1, _Digits));
+            Log("[" + _Symbol + "] COD SELL PHASE3: waiting break of point_1="
+                + DoubleToString(sell_point_1, _Digits)
+                + " pullback1_high=" + DoubleToString(sell_pullback1_high, _Digits));
             CheckSellBreak(c);
          }
          else
          {
-            Print("[", _Symbol, "] COD SELL RESET PHASE2: invalid pullback1 (greens=",
-                  sell_green1_count, " exceeded=", sell_pullback1_exceeded, ")");
+            Log("[" + _Symbol + "] COD SELL RESET PHASE2: invalid pullback1 (greens="
+                + IntegerToString(sell_green1_count) + " exceeded=" + (string)sell_pullback1_exceeded + ")");
             ResetSellState();
          }
       }
       return;
    }
 
-   // PHASE 3: wait for close < point_1
-   if(sell_phase == PHASE3_BREAK)
-   {
-      CheckSellBreak(c);
-      return;
-   }
+   if(sell_phase == PHASE3_BREAK) { CheckSellBreak(c); return; }
 
-   // PHASE 4: second pullback (greens, not necessarily consecutive)
    if(sell_phase == PHASE4_PULLBACK2)
    {
       if(is_green)
       {
          sell_green2_count++;
          sell_pullback2_high = MathMax(sell_pullback2_high, c.high);
-         // point_2 = lowest low of the GREEN pullback candles only
-         if(sell_point_2 == 0.0)
-            sell_point_2 = c.low;
-         else
-            sell_point_2 = MathMin(sell_point_2, c.low);
-         Print("[", _Symbol, "] COD SELL PHASE4: green #", sell_green2_count,
-               " ph2=", DoubleToString(sell_pullback2_high, _Digits),
-               " point_2=", DoubleToString(sell_point_2, _Digits));
+         if(sell_point_2 == 0.0) sell_point_2 = c.low;
+         else                    sell_point_2 = MathMin(sell_point_2, c.low);
+         Log("[" + _Symbol + "] COD SELL PHASE4: green #" + IntegerToString(sell_green2_count)
+             + " ph2=" + DoubleToString(sell_pullback2_high, _Digits)
+             + " point_2=" + DoubleToString(sell_point_2, _Digits));
       }
       else if(is_red)
       {
          if(sell_green2_count >= MIN_GREEN_CANDLES)
          {
             sell_phase = PHASE5_ENTRY;
-            Print("[", _Symbol, "] COD SELL PHASE5: waiting break of point_2=",
-                  DoubleToString(sell_point_2, _Digits),
-                  " SL=", DoubleToString(sell_pullback2_high, _Digits));
+            Log("[" + _Symbol + "] COD SELL PHASE5: waiting break of point_2="
+                + DoubleToString(sell_point_2, _Digits)
+                + " SL=" + DoubleToString(sell_pullback2_high, _Digits));
             CheckSellEntry(c);
          }
-         // else: keep accumulating greens
       }
       return;
    }
 
-   // PHASE 5: wait for close <= point_2
-   if(sell_phase == PHASE5_ENTRY)
-      CheckSellEntry(c);
+   if(sell_phase == PHASE5_ENTRY) CheckSellEntry(c);
 }
 
 //+------------------------------------------------------------------+
@@ -321,15 +316,15 @@ void CheckSellBreak(MqlRates &c)
       sell_phase          = PHASE4_PULLBACK2;
       sell_green2_count   = 0;
       sell_pullback2_high = c.high;
-      sell_point_2        = 0.0;   // set by first GREEN candle in PHASE4
-      Print("[", _Symbol, "] COD SELL PHASE4: point_1 broken. close=",
-            DoubleToString(c.close, _Digits),
-            " < point_1=", DoubleToString(sell_point_1, _Digits));
+      sell_point_2        = 0.0;
+      Log("[" + _Symbol + "] COD SELL PHASE4: point_1 broken. close="
+          + DoubleToString(c.close, _Digits)
+          + " < point_1=" + DoubleToString(sell_point_1, _Digits));
    }
    else
-      Print("[", _Symbol, "] COD SELL PHASE3 waiting: close=",
-            DoubleToString(c.close, _Digits),
-            " >= point_1=", DoubleToString(sell_point_1, _Digits));
+      Log("[" + _Symbol + "] COD SELL PHASE3 waiting: close="
+          + DoubleToString(c.close, _Digits)
+          + " >= point_1=" + DoubleToString(sell_point_1, _Digits));
 }
 
 //+------------------------------------------------------------------+
@@ -337,19 +332,17 @@ void CheckSellBreak(MqlRates &c)
 //+------------------------------------------------------------------+
 void CheckSellEntry(MqlRates &c)
 {
-   // point_2 not set yet (no green candle in PHASE4 yet)
-   if(sell_point_2 == 0.0)
-      return;
+   if(sell_point_2 == 0.0) return;
 
    if(c.close <= sell_point_2)
    {
-      double entry_price     = c.close;
-      double stop_loss_price = sell_pullback2_high;
-      double risk            = stop_loss_price - entry_price;
+      double entry_price       = c.close;
+      double stop_loss_price   = sell_pullback2_high;
+      double risk              = stop_loss_price - entry_price;
       double take_profit_price = entry_price - (risk * 2.0);
 
+      // Always print entry — regardless of DEBUG_LOGS
       Print("[", _Symbol, "] COD SELL ENTRY: close=", DoubleToString(entry_price, _Digits),
-            " <= point_2=", DoubleToString(sell_point_2, _Digits),
             " SL=", DoubleToString(stop_loss_price, _Digits),
             " TP=", DoubleToString(take_profit_price, _Digits),
             " risk=", DoubleToString(risk, _Digits));
@@ -358,9 +351,9 @@ void CheckSellEntry(MqlRates &c)
       OpenPosition("SELL", stop_loss_price, take_profit_price);
    }
    else
-      Print("[", _Symbol, "] COD SELL PHASE5 waiting: close=",
-            DoubleToString(c.close, _Digits),
-            " > point_2=", DoubleToString(sell_point_2, _Digits));
+      Log("[" + _Symbol + "] COD SELL PHASE5 waiting: close="
+          + DoubleToString(c.close, _Digits)
+          + " > point_2=" + DoubleToString(sell_point_2, _Digits));
 }
 
 //+------------------------------------------------------------------+
@@ -371,13 +364,13 @@ void UpdateBuyState(MqlRates &c)
    bool is_green = c.close > c.open;
    bool is_red   = c.close < c.open;
 
-   // RESET: only in PHASE4/PHASE5 — second pullback must not go below pullback1_low
+   // RESET: only in PHASE4/PHASE5
    if((buy_phase == PHASE4_PULLBACK2 || buy_phase == PHASE5_ENTRY) && buy_pullback1_low > 0.0)
    {
       if(c.close < buy_pullback1_low)
       {
-         Print("[", _Symbol, "] COD BUY RESET: close=", DoubleToString(c.close, _Digits),
-               " < pullback1_low=", DoubleToString(buy_pullback1_low, _Digits));
+         Log("[" + _Symbol + "] COD BUY RESET: close=" + DoubleToString(c.close, _Digits)
+             + " < pullback1_low=" + DoubleToString(buy_pullback1_low, _Digits));
          ResetBuyState();
          return;
       }
@@ -403,10 +396,17 @@ void UpdateBuyState(MqlRates &c)
       {
          buy_phase              = PHASE2_PULLBACK1;
          buy_red1_count         = 1;
-         buy_pullback1_low      = c.low;   // track min low of first pullback
+         buy_pullback1_low      = c.low;
          buy_pullback1_exceeded = (c.close < buy_first_green_open);
+         Log("[" + _Symbol + "] COD BUY PHASE2: pullback1 started. exceeded="
+             + (string)buy_pullback1_exceeded);
       }
-      else { ResetBuyState(); }
+      else
+      {
+         Log("[" + _Symbol + "] COD BUY RESET PHASE1: red before "
+             + IntegerToString(MIN_GREEN_CANDLES) + " greens (" + IntegerToString(buy_green_count) + ")");
+         ResetBuyState();
+      }
       return;
    }
 
@@ -415,14 +415,26 @@ void UpdateBuyState(MqlRates &c)
       if(is_red)
       {
          buy_red1_count++;
-         buy_pullback1_low = MathMin(buy_pullback1_low, c.low);   // track min
+         buy_pullback1_low = MathMin(buy_pullback1_low, c.low);
          if(c.close < buy_first_green_open) buy_pullback1_exceeded = true;
+         Log("[" + _Symbol + "] COD BUY PHASE2: red #" + IntegerToString(buy_red1_count)
+             + " exceeded=" + (string)buy_pullback1_exceeded);
       }
       else if(is_green)
       {
          if(buy_red1_count >= MIN_RED_CANDLES && buy_pullback1_exceeded)
-         { buy_phase = PHASE3_BREAK; CheckBuyBreak(c); }
-         else { ResetBuyState(); }
+         {
+            buy_phase = PHASE3_BREAK;
+            Log("[" + _Symbol + "] COD BUY PHASE3: waiting break of point_1="
+                + DoubleToString(buy_point_1, _Digits));
+            CheckBuyBreak(c);
+         }
+         else
+         {
+            Log("[" + _Symbol + "] COD BUY RESET PHASE2: invalid pullback1 (reds="
+                + IntegerToString(buy_red1_count) + " exceeded=" + (string)buy_pullback1_exceeded + ")");
+            ResetBuyState();
+         }
       }
       return;
    }
@@ -435,20 +447,29 @@ void UpdateBuyState(MqlRates &c)
       {
          buy_red2_count++;
          buy_pullback2_low = MathMin(buy_pullback2_low, c.low);
-         // point_2 = highest high of the RED pullback candles only
-         if(buy_point_2 == 0.0)
-            buy_point_2 = c.high;
-         else
-            buy_point_2 = MathMax(buy_point_2, c.high);
+         if(buy_point_2 == 0.0) buy_point_2 = c.high;
+         else                   buy_point_2 = MathMax(buy_point_2, c.high);
+         Log("[" + _Symbol + "] COD BUY PHASE4: red #" + IntegerToString(buy_red2_count)
+             + " pullback2_low=" + DoubleToString(buy_pullback2_low, _Digits)
+             + " point_2=" + DoubleToString(buy_point_2, _Digits));
       }
       else if(is_green && buy_red2_count >= MIN_RED_CANDLES)
-      { buy_phase = PHASE5_ENTRY; CheckBuyEntry(c); }
+      {
+         buy_phase = PHASE5_ENTRY;
+         Log("[" + _Symbol + "] COD BUY PHASE5: waiting break of point_2="
+             + DoubleToString(buy_point_2, _Digits)
+             + " SL=" + DoubleToString(buy_pullback2_low, _Digits));
+         CheckBuyEntry(c);
+      }
       return;
    }
 
    if(buy_phase == PHASE5_ENTRY) CheckBuyEntry(c);
 }
 
+//+------------------------------------------------------------------+
+//| Check BUY break of point_1                                        |
+//+------------------------------------------------------------------+
 void CheckBuyBreak(MqlRates &c)
 {
    if(c.close > buy_point_1)
@@ -456,38 +477,44 @@ void CheckBuyBreak(MqlRates &c)
       buy_phase         = PHASE4_PULLBACK2;
       buy_red2_count    = 0;
       buy_pullback2_low = c.low;
-      buy_point_2       = 0.0;   // set by first RED candle in PHASE4
-      Print("[", _Symbol, "] COD BUY PHASE4: point_1 broken. close=",
-            DoubleToString(c.close, _Digits),
-            " > point_1=", DoubleToString(buy_point_1, _Digits));
+      buy_point_2       = 0.0;
+      Log("[" + _Symbol + "] COD BUY PHASE4: point_1 broken. close="
+          + DoubleToString(c.close, _Digits)
+          + " > point_1=" + DoubleToString(buy_point_1, _Digits));
    }
    else
-      Print("[", _Symbol, "] COD BUY PHASE3 waiting: close=",
-            DoubleToString(c.close, _Digits),
-            " <= point_1=", DoubleToString(buy_point_1, _Digits));
+      Log("[" + _Symbol + "] COD BUY PHASE3 waiting: close="
+          + DoubleToString(c.close, _Digits)
+          + " <= point_1=" + DoubleToString(buy_point_1, _Digits));
 }
 
+//+------------------------------------------------------------------+
+//| Check BUY entry                                                   |
+//+------------------------------------------------------------------+
 void CheckBuyEntry(MqlRates &c)
 {
-   // point_2 not set yet (no red candle in PHASE4 yet)
-   if(buy_point_2 == 0.0)
-      return;
+   if(buy_point_2 == 0.0) return;
 
    if(c.close >= buy_point_2)
    {
-      double entry_price     = c.close;
-      double stop_loss_price = buy_pullback2_low;
-      double risk            = entry_price - stop_loss_price;
+      double entry_price       = c.close;
+      double stop_loss_price   = buy_pullback2_low;
+      double risk              = entry_price - stop_loss_price;
       double take_profit_price = entry_price + (risk * 2.0);
 
+      // Always print entry — regardless of DEBUG_LOGS
       Print("[", _Symbol, "] COD BUY ENTRY: close=", DoubleToString(entry_price, _Digits),
-            " >= point_2=", DoubleToString(buy_point_2, _Digits),
             " SL=", DoubleToString(stop_loss_price, _Digits),
-            " TP=", DoubleToString(take_profit_price, _Digits));
+            " TP=", DoubleToString(take_profit_price, _Digits),
+            " risk=", DoubleToString(risk, _Digits));
 
       ResetBuyState();
       OpenPosition("BUY", stop_loss_price, take_profit_price);
    }
+   else
+      Log("[" + _Symbol + "] COD BUY PHASE5 waiting: close="
+          + DoubleToString(c.close, _Digits)
+          + " < point_2=" + DoubleToString(buy_point_2, _Digits));
 }
 
 //+------------------------------------------------------------------+
@@ -516,11 +543,10 @@ void OpenPosition(string direction, double stop_loss_price, double take_profit_p
 {
    if(is_position_open) return;
 
-   // Check max open positions — counts ALL broker positions
    if(PositionsTotal() >= MAX_OPEN_POSITIONS)
    {
-      Print("[", _Symbol, "] Max open positions reached (",
-            PositionsTotal(), "/", MAX_OPEN_POSITIONS, ")");
+      Log("[" + _Symbol + "] Max open positions reached ("
+          + IntegerToString(PositionsTotal()) + "/" + IntegerToString(MAX_OPEN_POSITIONS) + ")");
       return;
    }
 
@@ -608,12 +634,12 @@ void ClosePosition(string close_reason)
    MqlTradeRequest req; MqlTradeResult res;
    ZeroMemory(req); ZeroMemory(res);
 
-   req.action   = TRADE_ACTION_DEAL;
-   req.symbol   = _Symbol;
-   req.position = (ulong)PositionGetInteger(POSITION_TICKET);
-   req.volume   = PositionGetDouble(POSITION_VOLUME);
+   req.action    = TRADE_ACTION_DEAL;
+   req.symbol    = _Symbol;
+   req.position  = (ulong)PositionGetInteger(POSITION_TICKET);
+   req.volume    = PositionGetDouble(POSITION_VOLUME);
    req.deviation = 20;
-   req.comment  = close_reason;
+   req.comment   = close_reason;
 
    if(current_position_direction == "BUY") { req.type = ORDER_TYPE_SELL; req.price = SymbolInfoDouble(_Symbol, SYMBOL_BID); }
    else                                    { req.type = ORDER_TYPE_BUY;  req.price = SymbolInfoDouble(_Symbol, SYMBOL_ASK); }
