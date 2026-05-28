@@ -557,7 +557,18 @@ void OpenPosition(string direction, double stop_loss_price, double take_profit_p
 
    if(stop_dist <= 0.0) { Print("[", _Symbol, "] Invalid stop distance"); return; }
 
-   double lot_size = NormalizeVolume(risk_amt / stop_dist);
+   // Calculate lot size correctly using tick_value and tick_size
+   double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+
+   if(tick_value <= 0.0 || tick_size <= 0.0)
+   {
+      Print("[", _Symbol, "] Invalid tick_value or tick_size");
+      return;
+   }
+
+   double loss_per_lot = (stop_dist / tick_size) * tick_value;
+   double lot_size = NormalizeVolume(risk_amt / loss_per_lot);
 
    if(PAPER_TRADING_MODE)
    {

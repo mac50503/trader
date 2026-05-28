@@ -348,7 +348,7 @@ void OpenPosition(string direction, double stop_loss) {
         return;
     }
 
-    // Calculate lot size
+    // Calculate lot size correctly using tick_value and tick_size
     double balance = AccountInfoDouble(ACCOUNT_BALANCE);
     double risk_amount = balance * (RISK_PERCENT / 100.0);
     double stop_distance = MathAbs(rates[0].close - stop_loss);
@@ -357,8 +357,17 @@ void OpenPosition(string direction, double stop_loss) {
         Print("[", _Symbol, "] Invalid stop distance");
         return;
     }
-    
-    double lot_size = risk_amount / stop_distance;
+
+    double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+    double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+
+    if(tick_value <= 0.0 || tick_size <= 0.0) {
+        Print("[", _Symbol, "] Invalid tick_value or tick_size");
+        return;
+    }
+
+    double loss_per_lot = (stop_distance / tick_size) * tick_value;
+    double lot_size = risk_amount / loss_per_lot;
     lot_size = NormalizeVolume(lot_size);
     
     // Prepare order
