@@ -292,11 +292,12 @@ void UpdateSellState(MqlRates &c)
    {
       if(is_green)
       {
-         // Validate: green must NOT make new low below point_1
-         if(c.low < sell_point_1)
+         // Validate: from 2nd green onwards, close must NOT go below point_1
+         if(sell_green1_count >= 1 && c.close < sell_point_1)
          {
-            Log("[" + _Symbol + "] COD SELL RESET PHASE2: green low below point_1 ("
-                + DoubleToString(c.low, _Digits) + " < " + DoubleToString(sell_point_1, _Digits) + ")");
+            Log("[" + _Symbol + "] COD SELL RESET PHASE2: green #" + IntegerToString(sell_green1_count + 1)
+                + " close below point_1 (close=" + DoubleToString(c.close, _Digits)
+                + " < point_1=" + DoubleToString(sell_point_1, _Digits) + ")");
             ResetSellState();
             return;
          }
@@ -461,11 +462,12 @@ void UpdateBuyState(MqlRates &c)
    {
       if(is_red)
       {
-         // Validate: red must NOT make new high above point_1
-         if(c.high > buy_point_1)
+         // Validate: from 2nd red onwards, close must NOT exceed point_1
+         if(buy_red1_count >= 1 && c.close > buy_point_1)
          {
-            Log("[" + _Symbol + "] COD BUY RESET PHASE2: red high above point_1 ("
-                + DoubleToString(c.high, _Digits) + " > " + DoubleToString(buy_point_1, _Digits) + ")");
+            Log("[" + _Symbol + "] COD BUY RESET PHASE2: red #" + IntegerToString(buy_red1_count + 1)
+                + " close above point_1 (close=" + DoubleToString(c.close, _Digits)
+                + " > point_1=" + DoubleToString(buy_point_1, _Digits) + ")");
             ResetBuyState();
             return;
          }

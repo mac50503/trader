@@ -194,11 +194,11 @@ class ChangeOfDirectionStrategy(BaseStrategy):
         # ── PHASE 2: first pullback (greens, not necessarily consecutive) ─
         if self._sell_phase == _PHASE2_PULLBACK1:
             if is_green:
-                # Validate: green candle must NOT make a new low below point_1
-                if l < self._sell_point_1:
+                # Validate: from 2nd green onwards, close must NOT go below point_1
+                if self._sell_green1_count >= 1 and c < self._sell_point_1:
                     logger.info(
-                        f"COD SELL RESET PHASE2: green made new low below point_1 "
-                        f"(low={l:.5f} < point_1={self._sell_point_1:.5f})"
+                        f"COD SELL RESET PHASE2: green #{self._sell_green1_count + 1} close below point_1 "
+                        f"(close={c:.5f} < point_1={self._sell_point_1:.5f})"
                     )
                     self._reset_sell_state()
                     return None
@@ -398,11 +398,11 @@ class ChangeOfDirectionStrategy(BaseStrategy):
         # ── PHASE 2: first pullback (reds, not necessarily consecutive) ───
         if self._buy_phase == _PHASE2_PULLBACK1:
             if is_red:
-                # Validate: red candle must NOT make a new high above point_1
-                if h > self._buy_point_1:
+                # Validate: from 2nd red onwards, close must NOT exceed point_1
+                if self._buy_red1_count >= 1 and c > self._buy_point_1:
                     logger.debug(
-                        f"COD BUY RESET PHASE2: red made new high above point_1 "
-                        f"(high={h:.5f} > point_1={self._buy_point_1:.5f})"
+                        f"COD BUY RESET PHASE2: red #{self._buy_red1_count + 1} close above point_1 "
+                        f"(close={c:.5f} > point_1={self._buy_point_1:.5f})"
                     )
                     self._reset_buy_state()
                     return None
