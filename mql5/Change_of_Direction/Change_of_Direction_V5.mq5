@@ -641,6 +641,7 @@ void OpenPosition(string direction, double stop_loss_price, double take_profit_p
    // Calculate lot size correctly using tick_value and tick_size
    double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double contract_size = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
 
    if(tick_value <= 0.0 || tick_size <= 0.0)
    {
@@ -648,8 +649,19 @@ void OpenPosition(string direction, double stop_loss_price, double take_profit_p
       return;
    }
 
+   // For XAUUSD: stop_dist in price points, tick_value per 1 lot
+   // loss_per_lot = (stop_dist / tick_size) * tick_value
+   // BUT: tick_value is already per 1 lot, so this is correct
    double loss_per_lot = (stop_dist / tick_size) * tick_value;
    double lot_size = NormalizeVolume(risk_amt / loss_per_lot);
+   
+   // Debug: Print calculation details
+   Print("[", _Symbol, "] LOT CALC DEBUG: balance=", DoubleToString(balance, 2),
+         " risk_pct=", DoubleToString(RISK_PERCENT, 2), "% risk_amt=", DoubleToString(risk_amt, 2),
+         " stop_dist=", DoubleToString(stop_dist, _Digits),
+         " tick_value=", DoubleToString(tick_value, 2), " tick_size=", DoubleToString(tick_size, _Digits),
+         " contract_size=", DoubleToString(contract_size, 2),
+         " loss_per_lot=", DoubleToString(loss_per_lot, 2), " lot_size=", DoubleToString(lot_size, 2));
 
    if(PAPER_TRADING_MODE)
    {
