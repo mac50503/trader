@@ -309,10 +309,10 @@ void UpdateSellState(MqlRates &c)
       }
       else if(is_red)
       {
-         // V7: Additional validation - after 1st green, ANY candle close < point_1 invalidates
-         if(sell_green1_count >= 1 && c.close < sell_point_1)
+         // V7: Additional validation - BETWEEN 1st and 2nd green, ANY red candle close < point_1 invalidates
+         if(sell_green1_count == 1 && c.close < sell_point_1)
          {
-            Log("[" + _Symbol + "] COD SELL RESET PHASE2 (V7): red candle close below point_1 (close="
+            Log("[" + _Symbol + "] COD SELL RESET PHASE2 (V7): red candle between 1st and 2nd green, close below point_1 (close="
                 + DoubleToString(c.close, _Digits) + " < point_1=" + DoubleToString(sell_point_1, _Digits) + ")");
             ResetSellState();
             return;
@@ -364,10 +364,10 @@ void UpdateSellState(MqlRates &c)
       }
       else if(is_red)
       {
-         // V7: Additional validation - after 1st green, ANY candle close < point_1 invalidates
-         if(sell_green2_count >= 1 && c.close < sell_point_1)
+         // V7: Additional validation - BETWEEN 1st and 2nd green, ANY red candle close < point_1 invalidates
+         if(sell_green2_count == 1 && c.close < sell_point_1)
          {
-            Log("[" + _Symbol + "] COD SELL RESET PHASE4 (V7): red candle close below point_1 (close="
+            Log("[" + _Symbol + "] COD SELL RESET PHASE4 (V7): red candle between 1st and 2nd green, close below point_1 (close="
                 + DoubleToString(c.close, _Digits) + " < point_1=" + DoubleToString(sell_point_1, _Digits) + ")");
             ResetSellState();
             return;
@@ -509,10 +509,10 @@ void UpdateBuyState(MqlRates &c)
       }
       else if(is_green)
       {
-         // V7: Additional validation - after 1st red, ANY candle close > point_1 invalidates
-         if(buy_red1_count >= 1 && c.close > buy_point_1)
+         // V7: Additional validation - BETWEEN 1st and 2nd red, ANY green candle close > point_1 invalidates
+         if(buy_red1_count == 1 && c.close > buy_point_1)
          {
-            Log("[" + _Symbol + "] COD BUY RESET PHASE2 (V7): green candle close above point_1 (close="
+            Log("[" + _Symbol + "] COD BUY RESET PHASE2 (V7): green candle between 1st and 2nd red, close above point_1 (close="
                 + DoubleToString(c.close, _Digits) + " > point_1=" + DoubleToString(buy_point_1, _Digits) + ")");
             ResetBuyState();
             return;
@@ -563,10 +563,10 @@ void UpdateBuyState(MqlRates &c)
       }
       else if(is_green && buy_red2_count >= MIN_RED_CANDLES)
       {
-         // V7: Additional validation - after 1st red, ANY candle close > point_1 invalidates
-         if(buy_red2_count >= 1 && c.close > buy_point_1)
+         // V7: Additional validation - BETWEEN 1st and 2nd red, ANY green candle close > point_1 invalidates
+         if(buy_red2_count == 1 && c.close > buy_point_1)
          {
-            Log("[" + _Symbol + "] COD BUY RESET PHASE4 (V7): green candle close above point_1 (close="
+            Log("[" + _Symbol + "] COD BUY RESET PHASE4 (V7): green candle between 1st and 2nd red, close above point_1 (close="
                 + DoubleToString(c.close, _Digits) + " > point_1=" + DoubleToString(buy_point_1, _Digits) + ")");
             ResetBuyState();
             return;
