@@ -652,6 +652,15 @@ void OpenPosition(string direction, double stop_loss_price, double take_profit_p
    // loss_per_lot = (stop_dist / tick_size) * tick_value
    // BUT: tick_value is already per 1 lot, so this is correct
    double loss_per_lot = (stop_dist / tick_size) * tick_value;
+   
+   // FIX: Some brokers/testers report tick_value=0.10 for XAUUSD instead of 1.00
+   // If tick_value is suspiciously small (< 0.5), multiply by 10
+   if(_Symbol == "XAUUSD" && tick_value < 0.5)
+   {
+      loss_per_lot = loss_per_lot * 10.0;
+      Print("[", _Symbol, "] Applied tick_value correction (x10) for XAUUSD");
+   }
+   
    double lot_size = NormalizeVolume(risk_amt / loss_per_lot);
    
    // Debug: Print calculation details
