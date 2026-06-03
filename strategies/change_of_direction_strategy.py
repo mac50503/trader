@@ -104,27 +104,33 @@ class ChangeOfDirectionStrategy(BaseStrategy):
         current_position: Optional[Position] = None,
     ) -> Signal:
         """Evaluate the last closed candle and return a trading signal."""
-        if len(df) < 5:
-            return Signal("HOLD", reason=f"Not enough data ({len(df)}/5 rows)")
+        if len(df) < 45:  # Need at least 40 for EMA40 + buffer
+            return Signal("HOLD", reason=f"Not enough data ({len(df)}/45 rows)")
 
         last = df.iloc[-1]
 
         if current_position:
             return self._check_exit(last, current_position)
 
-        if self.params["allow_short"]:
+        # ── Trend direction filter using EMA40 on M5 ──────────────────────
+        # Note: df is already M5 data from broker, we compute EMA40 on it
+        trend_buy_allowed  = self._is_trend_buy_allowed(df)
+        trend_sell_allowed = self._is_trend_sell_allowed(df)
+
+        if self.params["allow_short"] and trend_sell_allowed:
             sig = self._update_sell_state(last)
             if sig:
                 return sig
 
-        if self.params["allow_long"]:
+        if self.params["allow_long"] and trend_buy_allowed:
             sig = self._update_buy_state(last)
             if sig:
                 return sig
 
         return Signal(
             "HOLD",
-            reason=f"COD: sell={self._sell_phase} buy={self._buy_phase}",
+            reason=f"COD: sell={self._sell_phase} buy={self._buy_phase} | "
+                   f"trend_buy={trend_buy_allowed} trend_sell={trend_sell_allowed}",
         )
 
     # ── SELL State Machine ────────────────────────────────────────────────────
@@ -511,6 +517,24 @@ class ChangeOfDirectionStrategy(BaseStrategy):
         self._buy_red2_count         = 0
         self._buy_pullback2_low      = None
         self._buy_point_2            = None
+
+    # ── Trend Filter (EMA40 M5) ───────────────────────────────────────────────
+
+    def _is_trend_buy_allowed(self, df: pd.DataFrame) -> bool:
+        """Returns True if current price is above EMA40 (M5)."""
+        if len(df) < 40:
+            return True  # Not enough data, allow by default
+        ema40 = df["close"].ewm(span=40, adjust=False).mean().iloc[-1]
+        current_price = df["close"].iloc[-1]
+        return current_price > ema40
+
+    def _is_trend_sell_allowed(self, df: pd.DataFrame) -> bool:
+        """Returns True if current price is below EMA40 (M5)."""
+        if len(df) < 40:
+            return True  # Not enough data, allow by default
+        ema40 = df["close"].ewm(span=40, adjust=False).mean().iloc[-1]
+        current_price = df["close"].iloc[-1]
+        return current_price < ema40
 
     # ── Exit Check ────────────────────────────────────────────────────────────
 

@@ -266,6 +266,9 @@ class PatternVisualizer(tk.Toplevel):
         sl_price         = pullback2_high
         tp_price         = entry_px - (sl_price - entry_px) * 2.0
 
+        # ── EMA40 M5 values (descending for downtrend) ───────────────────
+        ema40_vals = [2338.00, 2336.50, 2335.00, 2333.50, 2332.00, 2330.50, 2329.00, 2327.50]
+
         self._draw_candle_chart(
             candles, w, h,
             h_lines=[
@@ -279,6 +282,7 @@ class PatternVisualizer(tk.Toplevel):
             ],
             entry_idx=7,
             entry_dir="SELL",
+            ema40_vals=ema40_vals,
             phase_labels=[
                 (0, "PHASE 1\n2 reds"),
                 (2, "PHASE 2\npullback 1"),
@@ -293,6 +297,9 @@ class PatternVisualizer(tk.Toplevel):
 
         lines = [
             ("CHANGE OF DIRECTION — SELL PATTERN (4 phases)\n", "header"),
+            ("\n", "value"),
+            ("⓪ TREND FILTER — EMA40 M5  ", "label"),
+            ("Price below EMA40 → DOWNTREND → only SELL patterns allowed ✓\n", "ok"),
             ("\n", "value"),
             ("① PHASE 1 — Consecutive reds  ", "label"),
             ("Candles 1-2: 2 consecutive RED  →  ", "value"),
@@ -386,6 +393,7 @@ class PatternVisualizer(tk.Toplevel):
         entry_dir="BUY",
         ema_fast_vals=None,
         ema_slow_vals=None,
+        ema40_vals=None,
         phase_labels=None,
     ):
         """
@@ -393,6 +401,7 @@ class PatternVisualizer(tk.Toplevel):
 
         candles: list of (open, high, low, close, role)
         h_lines: list of (price, color, label, style)
+        ema40_vals: EMA40 M5 values (for COD trend filter)
         """
         T = self._T
         h_lines = h_lines or []
@@ -469,6 +478,15 @@ class PatternVisualizer(tk.Toplevel):
                 self.canvas.create_line(
                     pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1],
                     fill=T["orange"], width=2, dash=(5, 3),
+                )
+
+        # ── EMA40 M5 (trend filter for COD) ───────────────────────────────
+        if ema40_vals and len(ema40_vals) == n:
+            pts = [(to_x(i), to_y(v)) for i, v in enumerate(ema40_vals)]
+            for i in range(len(pts) - 1):
+                self.canvas.create_line(
+                    pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1],
+                    fill="#9b59b6", width=2, smooth=True,
                 )
 
         # ── Candles ───────────────────────────────────────────────────────
@@ -575,6 +593,8 @@ class PatternVisualizer(tk.Toplevel):
                 ("—", T["blue"],   "EMA Fast (21)"),
                 ("—", T["orange"], "EMA Slow (50)"),
             ]
+        if ema40_vals:
+            legend_items.append(("—", "#9b59b6", "EMA40 M5 (trend filter)"))
 
         lx, ly = ml + 6, mt + 6
         for sym, color, text in legend_items:
