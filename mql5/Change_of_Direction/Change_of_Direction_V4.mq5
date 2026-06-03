@@ -332,6 +332,15 @@ void UpdateSellState(MqlRates &c)
    {
       if(is_green)
       {
+         // Validate: from 2nd green onwards, close must NOT go below point_1
+         if(sell_green2_count >= 1 && c.close < sell_point_1)
+         {
+            Log("[" + _Symbol + "] COD SELL RESET PHASE4: green #" + IntegerToString(sell_green2_count + 1)
+                + " close below point_1 (close=" + DoubleToString(c.close, _Digits)
+                + " < point_1=" + DoubleToString(sell_point_1, _Digits) + ")");
+            ResetSellState();
+            return;
+         }
          sell_green2_count++;
          sell_pullback2_high = MathMax(sell_pullback2_high, c.high);
          if(sell_point_2 == 0.0) sell_point_2 = c.low;
@@ -501,6 +510,15 @@ void UpdateBuyState(MqlRates &c)
    {
       if(is_red)
       {
+         // Validate: from 2nd red onwards, close must NOT exceed point_1
+         if(buy_red2_count >= 1 && c.close > buy_point_1)
+         {
+            Log("[" + _Symbol + "] COD BUY RESET PHASE4: red #" + IntegerToString(buy_red2_count + 1)
+                + " close above point_1 (close=" + DoubleToString(c.close, _Digits)
+                + " > point_1=" + DoubleToString(buy_point_1, _Digits) + ")");
+            ResetBuyState();
+            return;
+         }
          buy_red2_count++;
          buy_pullback2_low = MathMin(buy_pullback2_low, c.low);
          if(buy_point_2 == 0.0) buy_point_2 = c.high;
