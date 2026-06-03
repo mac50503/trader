@@ -249,10 +249,10 @@ class ChangeOfDirectionStrategy(BaseStrategy):
                     self._sell_point_2 = l
                 else:
                     self._sell_point_2 = min(self._sell_point_2, l)
-                logger.debug(
+                logger.info(
                     f"COD SELL PHASE4: green #{self._sell_green2_count} "
-                    f"ph2={self._sell_pullback2_high:.5f} "
-                    f"point_2={self._sell_point_2:.5f}"
+                    f"close={c:.5f} low={l:.5f} ph2={self._sell_pullback2_high:.5f} "
+                    f"point_2={self._sell_point_2:.5f} point_1={self._sell_point_1:.5f}"
                 )
             elif is_red:
                 if self._sell_green2_count >= self.params["min_green_candles"]:
@@ -446,6 +446,11 @@ class ChangeOfDirectionStrategy(BaseStrategy):
                     self._buy_point_2 = h
                 else:
                     self._buy_point_2 = max(self._buy_point_2, h)
+                logger.info(
+                    f"COD BUY PHASE4: red #{self._buy_red2_count} "
+                    f"close={c:.5f} high={h:.5f} pb2_low={self._buy_pullback2_low:.5f} "
+                    f"point_2={self._buy_point_2:.5f} point_1={self._buy_point_1:.5f}"
+                )
             elif is_green:
                 if self._buy_red2_count >= self.params["min_red_candles"]:
                     self._buy_phase = _PHASE5_ENTRY
@@ -459,6 +464,7 @@ class ChangeOfDirectionStrategy(BaseStrategy):
         return None
 
     def _check_buy_break(self, candle: pd.Series) -> Optional[Signal]:
+        """Check if price broke above point_1 (phase 3 → phase 4)."""
         c = candle["close"]
         l = candle["low"]
 

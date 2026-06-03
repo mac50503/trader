@@ -1,14 +1,15 @@
 //+------------------------------------------------------------------+
-//| Change of Direction V3.mq5                                       |
-//| Reversal strategy — 4-phase state machine + protective filters   |
+//| Change of Direction V5.mq5                                       |
+//| Reversal strategy — 4-phase state machine                        |
+//| V5: EXPERIMENTAL - Uses LOW/HIGH for breakout instead of CLOSE   |
 //+------------------------------------------------------------------+
 #property strict
 #property version     "5.0"
-#property description "Change of Direction V3 — Risk & Session Filters (No Trend Filter)"
+#property description "Change of Direction V5 — Reversal EA (LOW/HIGH breakout)"
 #property copyright   "AlgoTrader Pro"
 
 //+------------------------------------------------------------------+
-//| Input Parameters — Original                                       |
+//| Input Parameters                                                  |
 //+------------------------------------------------------------------+
 input int      MIN_RED_CANDLES        = 2;       // Min consecutive red candles (initial drop)
 input int      MIN_GREEN_CANDLES      = 2;       // Min green candles per pullback (not consecutive)
@@ -17,22 +18,11 @@ input bool     ALLOW_LONG             = true;    // Enable BUY signals
 input double   RISK_PERCENT           = 1.0;     // Risk per trade (%)
 input double   MAX_DAILY_LOSS_PCT     = 30.0;    // Max daily loss (%) - reserved
 input int      MAX_OPEN_POSITIONS     = 1;       // Max concurrent positions (all broker positions)
-input bool     PAPER_TRADING_MODE     = false;   // true = only print, false = real orders
+input bool     PAPER_TRADING_MODE     = false;  // true = only print, false = real orders
 input bool     DEBUG_LOGS             = false;   // true = print all phase transitions, false = silent
 
 //+------------------------------------------------------------------+
-//| Input Parameters — V3 Filters (No Trend Filter)                  |
-//+------------------------------------------------------------------+
-input int      MAX_CONSECUTIVE_LOSSES = 5;       // Pause after N consecutive SL hits
-input double   MAX_RISK_POINTS        = 30.0;    // Max allowed risk in points (skip if larger)
-input double   MIN_RISK_POINTS        = 3.0;     // Min pattern size in points (skip noise)
-
-input bool     USE_SESSION_FILTER     = true;    // Enable trading hours filter
-input int      TRADING_HOUR_START     = 8;       // Start hour (server time, inclusive)
-input int      TRADING_HOUR_END       = 18;      // End hour (server time, exclusive)
-
-//+------------------------------------------------------------------+
-//| Logging helper                                                    |
+//| Logging helper — only prints when DEBUG_LOGS is true             |
 //+------------------------------------------------------------------+
 void Log(string message)
 {
@@ -61,12 +51,6 @@ double         current_position_stop_loss  = 0.0;
 double         current_position_take_profit = 0.0;
 
 //+------------------------------------------------------------------+
-//| Global Variables — V3 Filters (No Trend Filter)                  |
-//+------------------------------------------------------------------+
-int            consecutive_losses          = 0;    // Counter for consecutive SL hits
-bool           trading_paused              = false; // Pause flag after max losses
-
-//+------------------------------------------------------------------+
 //| Global Variables — SELL state machine                             |
 //+------------------------------------------------------------------+
 int            sell_phase               = PHASE_IDLE;
@@ -91,6 +75,11 @@ double         buy_pullback1_low        = 0.0;
 int            buy_red2_count           = 0;
 double         buy_pullback2_low        = 0.0;
 double         buy_point_2              = 0.0;
+
+//+------------------------------------------------------------------+
+//| Global Variables — Trend Filter (EMA40 M5)                        |
+//+------------------------------------------------------------------+
+int            ema40_handle             = INVALID_HANDLE; // Handle for EMA40 on M5
 
 MqlRates       rates[];
 
@@ -120,38 +109,39 @@ double NormalizeVolume(double volume)
 }
 
 //+------------------------------------------------------------------+
-//| V3: Check if current hour is within trading session              |
+//| Get EMA40 value from M5 timeframe                                |
 //+------------------------------------------------------------------+
-bool IsWithinTradingHours()
+double GetEMA40_M5()
 {
-   if(!USE_SESSION_FILTER) return true;
-   MqlDateTime dt;
-   TimeCurrent(dt);
-   int hour = dt.hour;
-   if(TRADING_HOUR_START < TRADING_HOUR_END)
-      return (hour >= TRADING_HOUR_START && hour < TRADING_HOUR_END);
-   else // overnight session (e.g., 22 to 6)
-      return (hour >= TRADING_HOUR_START || hour < TRADING_HOUR_END);
+   if(ema40_handle == INVALID_HANDLE) return 0.0;
+   double ema_buf[];
+   ArraySetAsSeries(ema_buf, true);
+   if(CopyBuffer(ema40_handle, 0, 0, 1, ema_buf) <= 0) return 0.0;
+   return ema_buf[0];
 }
 
 //+------------------------------------------------------------------+
-//| V3: Check risk size filter — returns true if risk is acceptable  |
+//| Check if BUY is allowed based on trend (price > EMA40 M5)        |
 //+------------------------------------------------------------------+
-bool IsRiskAcceptable(double risk_points)
+bool IsTrendBuyAllowed()
 {
-   if(risk_points > MAX_RISK_POINTS)
-   {
-      Print("[", _Symbol, "] V3 RISK FILTER: Rejected. Risk=", DoubleToString(risk_points, _Digits),
-            " > MAX=", DoubleToString(MAX_RISK_POINTS, _Digits));
-      return false;
-   }
-   if(risk_points < MIN_RISK_POINTS)
-   {
-      Log("[" + _Symbol + "] V3 MIN RISK FILTER: Rejected noise. Risk=" + DoubleToString(risk_points, _Digits)
-          + " < MIN=" + DoubleToString(MIN_RISK_POINTS, _Digits));
-      return false;
-   }
-   return true;
+   if(!ALLOW_LONG) return false;
+   double ema40 = GetEMA40_M5();
+   if(ema40 <= 0.0) return true; // No data yet, allow
+   double current_price = rates[1].close;
+   return current_price > ema40;
+}
+
+//+------------------------------------------------------------------+
+//| Check if SELL is allowed based on trend (price < EMA40 M5)       |
+//+------------------------------------------------------------------+
+bool IsTrendSellAllowed()
+{
+   if(!ALLOW_SHORT) return false;
+   double ema40 = GetEMA40_M5();
+   if(ema40 <= 0.0) return true; // No data yet, allow
+   double current_price = rates[1].close;
+   return current_price < ema40;
 }
 
 //+------------------------------------------------------------------+
@@ -191,12 +181,20 @@ void ResetBuyState()
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print("[", _Symbol, "] Change of Direction V3 (v5.0) initialized");
-   Print("[", _Symbol, "] Filters: MaxConsecLosses=", MAX_CONSECUTIVE_LOSSES,
-         " MaxRisk=", MAX_RISK_POINTS, " MinRisk=", MIN_RISK_POINTS);
-   Print("[", _Symbol, "] Session=", USE_SESSION_FILTER, " (", TRADING_HOUR_START, ":00 - ",
-         TRADING_HOUR_END, ":00)");
+   // Create EMA40 indicator handle on M5 timeframe
+   ema40_handle = iMA(_Symbol, PERIOD_M5, 40, 0, MODE_EMA, PRICE_CLOSE);
+   if(ema40_handle == INVALID_HANDLE)
+   {
+      Print("[", _Symbol, "] WARNING: Failed to create EMA40 M5 handle. Trend filter disabled.");
+   }
+   else
+   {
+      Print("[", _Symbol, "] EMA40 M5 trend filter initialized.");
+   }
 
+   Log("[" + _Symbol + "] Change of Direction V5.0 initialized (LOW/HIGH breakout) | MIN_RED=" + IntegerToString(MIN_RED_CANDLES)
+       + " MIN_GREEN=" + IntegerToString(MIN_GREEN_CANDLES)
+       + " PAPER=" + (string)PAPER_TRADING_MODE + " DEBUG=" + (string)DEBUG_LOGS);
    return INIT_SUCCEEDED;
 }
 
@@ -205,7 +203,9 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Log("[" + _Symbol + "] Change of Direction V3 deinitialized. Reason=" + IntegerToString(reason));
+   if(ema40_handle != INVALID_HANDLE)
+      IndicatorRelease(ema40_handle);
+   Log("[" + _Symbol + "] Change of Direction deinitialized. Reason=" + IntegerToString(reason));
 }
 
 //+------------------------------------------------------------------+
@@ -225,36 +225,8 @@ void OnTick()
       CheckExitSignal(candle);
    else
    {
-      // V3: Check if trading is paused due to consecutive losses
-      if(trading_paused)
-      {
-         Log("[" + _Symbol + "] V3: Trading PAUSED after " + IntegerToString(consecutive_losses)
-             + " consecutive losses. Waiting for pattern reset...");
-         // Reset pause when both state machines are idle (full reset)
-         if(sell_phase == PHASE_IDLE && buy_phase == PHASE_IDLE)
-         {
-            trading_paused = false;
-            consecutive_losses = 0;
-            Print("[", _Symbol, "] V3: Trading RESUMED after pattern reset.");
-         }
-         else
-         {
-            // Force reset both machines to start fresh
-            ResetSellState();
-            ResetBuyState();
-            return;
-         }
-      }
-
-      // V3: Check trading hours
-      if(!IsWithinTradingHours())
-      {
-         Log("[" + _Symbol + "] V3: Outside trading hours. Skipping.");
-         return;
-      }
-
-      if(ALLOW_SHORT) UpdateSellState(candle);
-      if(ALLOW_LONG)  UpdateBuyState(candle);
+      if(IsTrendSellAllowed()) UpdateSellState(candle);
+      if(IsTrendBuyAllowed())  UpdateBuyState(candle);
    }
 }
 
@@ -321,10 +293,12 @@ void UpdateSellState(MqlRates &c)
    {
       if(is_green)
       {
-         if(c.low < sell_point_1)
+         // Validate: from 2nd green onwards, close must NOT go below point_1
+         if(sell_green1_count >= 1 && c.close < sell_point_1)
          {
-            Log("[" + _Symbol + "] COD SELL RESET PHASE2: green low below point_1 ("
-                + DoubleToString(c.low, _Digits) + " < " + DoubleToString(sell_point_1, _Digits) + ")");
+            Log("[" + _Symbol + "] COD SELL RESET PHASE2: green #" + IntegerToString(sell_green1_count + 1)
+                + " close below point_1 (close=" + DoubleToString(c.close, _Digits)
+                + " < point_1=" + DoubleToString(sell_point_1, _Digits) + ")");
             ResetSellState();
             return;
          }
@@ -359,6 +333,15 @@ void UpdateSellState(MqlRates &c)
    {
       if(is_green)
       {
+         // Validate: from 2nd green onwards, close must NOT go below point_1
+         if(sell_green2_count >= 1 && c.close < sell_point_1)
+         {
+            Log("[" + _Symbol + "] COD SELL RESET PHASE4: green #" + IntegerToString(sell_green2_count + 1)
+                + " close below point_1 (close=" + DoubleToString(c.close, _Digits)
+                + " < point_1=" + DoubleToString(sell_point_1, _Digits) + ")");
+            ResetSellState();
+            return;
+         }
          sell_green2_count++;
          sell_pullback2_high = MathMax(sell_pullback2_high, c.high);
          if(sell_point_2 == 0.0) sell_point_2 = c.low;
@@ -388,28 +371,28 @@ void UpdateSellState(MqlRates &c)
 }
 
 //+------------------------------------------------------------------+
-//| Check SELL break of point_1                                       |
+//| Check SELL break of point_1 (V5: uses LOW instead of CLOSE)      |
 //+------------------------------------------------------------------+
 void CheckSellBreak(MqlRates &c)
 {
-   if(c.close < sell_point_1)
+   if(c.low < sell_point_1)
    {
       sell_phase          = PHASE4_PULLBACK2;
       sell_green2_count   = 0;
       sell_pullback2_high = c.high;
       sell_point_2        = 0.0;
-      Log("[" + _Symbol + "] COD SELL PHASE4: point_1 broken. close="
-          + DoubleToString(c.close, _Digits)
+      Log("[" + _Symbol + "] COD SELL PHASE4 (V5): point_1 broken. low="
+          + DoubleToString(c.low, _Digits)
           + " < point_1=" + DoubleToString(sell_point_1, _Digits));
    }
    else
-      Log("[" + _Symbol + "] COD SELL PHASE3 waiting: close="
-          + DoubleToString(c.close, _Digits)
+      Log("[" + _Symbol + "] COD SELL PHASE3 waiting (V5): low="
+          + DoubleToString(c.low, _Digits)
           + " >= point_1=" + DoubleToString(sell_point_1, _Digits));
 }
 
 //+------------------------------------------------------------------+
-//| Check SELL entry — with V2 filters                               |
+//| Check SELL entry                                                  |
 //+------------------------------------------------------------------+
 void CheckSellEntry(MqlRates &c)
 {
@@ -422,13 +405,7 @@ void CheckSellEntry(MqlRates &c)
       double risk              = stop_loss_price - entry_price;
       double take_profit_price = entry_price - (risk * 2.0);
 
-      // V3: Check risk size
-      if(!IsRiskAcceptable(risk))
-      {
-         ResetSellState();
-         return;
-      }
-
+      // Always print entry — regardless of DEBUG_LOGS
       Print("[", _Symbol, "] COD SELL ENTRY: close=", DoubleToString(entry_price, _Digits),
             " SL=", DoubleToString(stop_loss_price, _Digits),
             " TP=", DoubleToString(take_profit_price, _Digits),
@@ -498,10 +475,12 @@ void UpdateBuyState(MqlRates &c)
    {
       if(is_red)
       {
-         if(c.high > buy_point_1)
+         // Validate: from 2nd red onwards, close must NOT exceed point_1
+         if(buy_red1_count >= 1 && c.close > buy_point_1)
          {
-            Log("[" + _Symbol + "] COD BUY RESET PHASE2: red high above point_1 ("
-                + DoubleToString(c.high, _Digits) + " > " + DoubleToString(buy_point_1, _Digits) + ")");
+            Log("[" + _Symbol + "] COD BUY RESET PHASE2: red #" + IntegerToString(buy_red1_count + 1)
+                + " close above point_1 (close=" + DoubleToString(c.close, _Digits)
+                + " > point_1=" + DoubleToString(buy_point_1, _Digits) + ")");
             ResetBuyState();
             return;
          }
@@ -535,13 +514,25 @@ void UpdateBuyState(MqlRates &c)
    {
       if(is_red)
       {
+         // Validate: from 2nd red onwards, close must NOT exceed point_1
+         if(buy_red2_count >= 1 && c.close > buy_point_1)
+         {
+            Log("[" + _Symbol + "] COD BUY RESET PHASE4: red #" + IntegerToString(buy_red2_count + 1)
+                + " close above point_1 (close=" + DoubleToString(c.close, _Digits)
+                + " > point_1=" + DoubleToString(buy_point_1, _Digits) + ")");
+            ResetBuyState();
+            return;
+         }
          buy_red2_count++;
          buy_pullback2_low = MathMin(buy_pullback2_low, c.low);
          if(buy_point_2 == 0.0) buy_point_2 = c.high;
          else                   buy_point_2 = MathMax(buy_point_2, c.high);
          Log("[" + _Symbol + "] COD BUY PHASE4: red #" + IntegerToString(buy_red2_count)
+             + " close=" + DoubleToString(c.close, _Digits)
+             + " high=" + DoubleToString(c.high, _Digits)
              + " pullback2_low=" + DoubleToString(buy_pullback2_low, _Digits)
-             + " point_2=" + DoubleToString(buy_point_2, _Digits));
+             + " point_2=" + DoubleToString(buy_point_2, _Digits)
+             + " point_1=" + DoubleToString(buy_point_1, _Digits));
       }
       else if(is_green && buy_red2_count >= MIN_RED_CANDLES)
       {
@@ -558,28 +549,28 @@ void UpdateBuyState(MqlRates &c)
 }
 
 //+------------------------------------------------------------------+
-//| Check BUY break of point_1                                        |
+//| Check BUY break of point_1 (V5: uses HIGH instead of CLOSE)       |
 //+------------------------------------------------------------------+
 void CheckBuyBreak(MqlRates &c)
 {
-   if(c.close > buy_point_1)
+   if(c.high > buy_point_1)
    {
       buy_phase         = PHASE4_PULLBACK2;
       buy_red2_count    = 0;
       buy_pullback2_low = c.low;
       buy_point_2       = 0.0;
-      Log("[" + _Symbol + "] COD BUY PHASE4: point_1 broken. close="
-          + DoubleToString(c.close, _Digits)
+      Log("[" + _Symbol + "] COD BUY PHASE4 (V5): point_1 broken. high="
+          + DoubleToString(c.high, _Digits)
           + " > point_1=" + DoubleToString(buy_point_1, _Digits));
    }
    else
-      Log("[" + _Symbol + "] COD BUY PHASE3 waiting: close="
-          + DoubleToString(c.close, _Digits)
+      Log("[" + _Symbol + "] COD BUY PHASE3 waiting (V5): high="
+          + DoubleToString(c.high, _Digits)
           + " <= point_1=" + DoubleToString(buy_point_1, _Digits));
 }
 
 //+------------------------------------------------------------------+
-//| Check BUY entry — with V2 filters                                |
+//| Check BUY entry                                                   |
 //+------------------------------------------------------------------+
 void CheckBuyEntry(MqlRates &c)
 {
@@ -592,13 +583,7 @@ void CheckBuyEntry(MqlRates &c)
       double risk              = entry_price - stop_loss_price;
       double take_profit_price = entry_price + (risk * 2.0);
 
-      // V3: Check risk size
-      if(!IsRiskAcceptable(risk))
-      {
-         ResetBuyState();
-         return;
-      }
-
+      // Always print entry — regardless of DEBUG_LOGS
       Print("[", _Symbol, "] COD BUY ENTRY: close=", DoubleToString(entry_price, _Digits),
             " SL=", DoubleToString(stop_loss_price, _Digits),
             " TP=", DoubleToString(take_profit_price, _Digits),
@@ -653,6 +638,7 @@ void OpenPosition(string direction, double stop_loss_price, double take_profit_p
 
    if(stop_dist <= 0.0) { Print("[", _Symbol, "] Invalid stop distance"); return; }
 
+   // Calculate lot size correctly using tick_value and tick_size
    double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
 
@@ -690,7 +676,7 @@ void OpenPosition(string direction, double stop_loss_price, double take_profit_p
    req.sl        = NormalizeDouble(stop_loss_price, _Digits);
    req.tp        = NormalizeDouble(take_profit_price, _Digits);
    req.deviation = 20;
-   req.comment   = "COD V3";
+   req.comment   = "Change of Direction";
 
    if(direction == "BUY") { req.type = ORDER_TYPE_BUY;  req.price = SymbolInfoDouble(_Symbol, SYMBOL_ASK); }
    else                   { req.type = ORDER_TYPE_SELL; req.price = SymbolInfoDouble(_Symbol, SYMBOL_BID); }
@@ -711,27 +697,11 @@ void OpenPosition(string direction, double stop_loss_price, double take_profit_p
 }
 
 //+------------------------------------------------------------------+
-//| Close Position — with V2 consecutive loss tracking               |
+//| Close Position                                                    |
 //+------------------------------------------------------------------+
 void ClosePosition(string close_reason)
 {
    if(!is_position_open) return;
-
-   // V2: Track consecutive losses
-   if(close_reason == "Stop Loss hit")
-   {
-      consecutive_losses++;
-      Print("[", _Symbol, "] V2: Consecutive losses = ", consecutive_losses, "/", MAX_CONSECUTIVE_LOSSES);
-      if(consecutive_losses >= MAX_CONSECUTIVE_LOSSES)
-      {
-         trading_paused = true;
-         Print("[", _Symbol, "] V2: TRADING PAUSED after ", consecutive_losses, " consecutive losses!");
-      }
-   }
-   else if(close_reason == "Take Profit hit")
-   {
-      consecutive_losses = 0; // Reset counter on win
-   }
 
    if(PAPER_TRADING_MODE)
    {

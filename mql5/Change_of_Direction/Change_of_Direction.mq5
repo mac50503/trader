@@ -346,8 +346,11 @@ void UpdateSellState(MqlRates &c)
          if(sell_point_2 == 0.0) sell_point_2 = c.low;
          else                    sell_point_2 = MathMin(sell_point_2, c.low);
          Log("[" + _Symbol + "] COD SELL PHASE4: green #" + IntegerToString(sell_green2_count)
+             + " close=" + DoubleToString(c.close, _Digits)
+             + " low=" + DoubleToString(c.low, _Digits)
              + " ph2=" + DoubleToString(sell_pullback2_high, _Digits)
-             + " point_2=" + DoubleToString(sell_point_2, _Digits));
+             + " point_2=" + DoubleToString(sell_point_2, _Digits)
+             + " point_1=" + DoubleToString(sell_point_1, _Digits));
       }
       else if(is_red)
       {
@@ -524,8 +527,11 @@ void UpdateBuyState(MqlRates &c)
          if(buy_point_2 == 0.0) buy_point_2 = c.high;
          else                   buy_point_2 = MathMax(buy_point_2, c.high);
          Log("[" + _Symbol + "] COD BUY PHASE4: red #" + IntegerToString(buy_red2_count)
+             + " close=" + DoubleToString(c.close, _Digits)
+             + " high=" + DoubleToString(c.high, _Digits)
              + " pullback2_low=" + DoubleToString(buy_pullback2_low, _Digits)
-             + " point_2=" + DoubleToString(buy_point_2, _Digits));
+             + " point_2=" + DoubleToString(buy_point_2, _Digits)
+             + " point_1=" + DoubleToString(buy_point_1, _Digits));
       }
       else if(is_green && buy_red2_count >= MIN_RED_CANDLES)
       {
