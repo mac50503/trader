@@ -603,6 +603,28 @@ void CheckBuyEntry(MqlRates &c)
 void CheckExitSignal(MqlRates &c)
 {
    if(!is_position_open) return;
+   
+   // First check if position still exists (might be closed by SL/TP automatically)
+   if(!PAPER_TRADING_MODE)
+   {
+      bool position_exists = false;
+      for(int i = 0; i < PositionsTotal(); i++)
+      {
+         if(PositionSelectByTicket(current_position_ticket))
+         {
+            position_exists = true;
+            break;
+         }
+      }
+      
+      if(!position_exists)
+      {
+         // Position was closed automatically (SL/TP hit)
+         Print("[", _Symbol, "] Position closed automatically (SL/TP)");
+         is_position_open = false;
+         return;
+      }
+   }
 
    if(current_position_direction == "SELL")
    {
