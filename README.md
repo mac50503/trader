@@ -40,10 +40,12 @@ trader/
 │   └── pattern_visualizer.py      # Visual entry pattern diagram
 │
 ├── strategies/
-│   ├── base_strategy.py           # Abstract base + Signal dataclass
-│   ├── ema_trend_strategy.py      # EMA Pullback Pro
-│   ├── change_of_direction_strategy.py  # Change of Direction (COD)
-│   └── strategy_registry.py       # Strategy registry + hot-swap
+│   ├── base_strategy.py                    # Abstract base + Signal dataclass
+│   ├── ema_trend_strategy.py               # EMA Pullback Pro
+│   ├── change_of_direction_strategy.py     # Change of Direction (single pattern)
+│   ├── pattern_priority_strategy.py        # COD Multi-Pattern (tracks all patterns)
+│   ├── strategy_registry.py                # Strategy registry + hot-swap
+│   └── CHANGE_OF_DIRECTION.md              # COD strategy documentation
 │
 ├── brokers/
 │   ├── base_broker.py             # Abstract interface
@@ -76,12 +78,17 @@ trader/
 │
 ├── mql5/
 │   ├── MQL5_CONVERSION_GUIDE.md   # Guide for converting strategies to MQL5
+│   ├── README.md                  # MQL5 overview
 │   ├── EMA_Pullback_Pro/
 │   │   ├── EMA_Pullback_Pro.mq5
 │   │   └── README.md
 │   └── Change_of_Direction/
-│       ├── Change_of_Direction.mq5
-│       └── README.md
+│       ├── Change_of_Direction_V6.mq5          # ✅ Base version
+│       ├── Change_of_Direction_V7.mq5          # ⚠️ Experimental
+│       ├── Change_of_Direction_MultiPattern.mq5 # 🆕 Multi-pattern
+│       ├── README.md                           # Main guide
+│       ├── README_MultiPattern.md              # V8 specific guide
+│       └── VERSION_COMPARISON.md               # Detailed version comparison
 │
 └── logs/
 ```
@@ -205,16 +212,53 @@ pytest tests/test_strategy.py -v
 
 ## 🤖 MetaTrader 5 Expert Advisors
 
-Both strategies are available as MQL5 EAs with identical logic.
+Both strategies are available as MQL5 EAs with **multiple versions** and identical logic to Python.
 
-| EA | File | Paper Mode |
-|----|------|------------|
-| EMA Pullback Pro | `mql5/EMA_Pullback_Pro/EMA_Pullback_Pro.mq5` | `PAPER_TRADING_MODE=true` |
-| Change of Direction | `mql5/Change_of_Direction/Change_of_Direction.mq5` | `PAPER_TRADING_MODE=true` |
+### Available EAs
 
-**Installation**: Copy `.mq5` to MT5 `Experts` folder → compile in MetaEditor → attach to chart.
+| Strategy | Python File | MQL5 Versions | Description |
+|----------|-------------|---------------|-------------|
+| **Change of Direction** | `change_of_direction_strategy.py` | **V6** (single pattern) | ✅ Base version — proven & stable |
+| | | **V7** (experimental) | ⚠️ Testing only — stricter validation |
+| | `pattern_priority_strategy.py` | **V8** (multi-pattern) | 🆕 Tracks all patterns, first wins |
+| **EMA Pullback Pro** | `ema_trend_strategy.py` | **V1** | Classic EMA bounce strategy |
 
-See `mql5/MQL5_CONVERSION_GUIDE.md` for best practices when converting Python strategies to MQL5.
+### Change of Direction Versions
+
+| Version | File | Tracking | Python Match | Status |
+|---------|------|----------|--------------|--------|
+| V6 | `Change_of_Direction_V6.mq5` | 1 SELL + 1 BUY | `change_of_direction_strategy.py` | ✅ Production |
+| V7 | `Change_of_Direction_V7.mq5` | 1 SELL + 1 BUY | *(testing only)* | ⚠️ Experimental |
+| V8 | `Change_of_Direction_MultiPattern.mq5` | Multiple patterns | `pattern_priority_strategy.py` | ✅ Production |
+
+**Recommended**: Start with **V6** for stability, upgrade to **V8** for more opportunities.
+
+### Installation
+
+1. **Copy** `.mq5` file to: `...\MQL5\Experts\`
+2. **Compile** in MetaEditor (F7)
+3. **Attach** to XAUUSD M5 chart
+4. **Configure** parameters (start with `PAPER_TRADING_MODE = true`)
+
+### Documentation
+
+- **Main guide**: `mql5/Change_of_Direction/README.md`
+- **Version comparison**: `mql5/Change_of_Direction/VERSION_COMPARISON.md`
+- **Conversion guide**: `mql5/MQL5_CONVERSION_GUIDE.md`
+
+### Paper Trading Mode
+
+All EAs support paper trading (logs only, no real orders):
+
+```mql5
+input bool PAPER_TRADING_MODE = true;  // Start with this
+```
+
+**Logs example**:
+```
+[XAUUSD] Pattern #2 SELL ENTRY: close=2610.00 SL=2618.50 TP=2593.00
+[XAUUSD] [PAPER] SELL @ 2610.00 lot=0.10 SL=2618.50 TP=2593.00
+```
 
 ---
 

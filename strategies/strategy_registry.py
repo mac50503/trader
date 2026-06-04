@@ -9,6 +9,7 @@ from typing import Dict, Type, Optional
 from strategies.base_strategy import BaseStrategy
 from strategies.ema_trend_strategy import EmaTrendStrategy
 from strategies.change_of_direction_strategy import ChangeOfDirectionStrategy
+from strategies.pattern_priority_strategy import PatternPriorityStrategy
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -23,6 +24,7 @@ class StrategyRegistry:
     _strategies: Dict[str, Type[BaseStrategy]] = {
         "EMA Pullback Pro": EmaTrendStrategy,
         "Change of Direction": ChangeOfDirectionStrategy,
+        "Pattern Priority": PatternPriorityStrategy,
     }
 
     @classmethod
