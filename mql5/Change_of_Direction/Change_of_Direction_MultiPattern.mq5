@@ -271,6 +271,9 @@ bool UpdateSingleSellPattern(Pattern &p, MqlRates &c)
       else
       {
          p.phase = PHASE_INVALID;
+         Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+             + ": INVALIDATED in PHASE1 - green candle but only " + IntegerToString(p.red_count) 
+             + " reds (need " + IntegerToString(MIN_RED_CANDLES) + ")");
       }
       return false;
    }
@@ -283,6 +286,9 @@ bool UpdateSingleSellPattern(Pattern &p, MqlRates &c)
          if(p.green1_count >= 1 && c.close < p.point_1)
          {
             p.phase = PHASE_INVALID;
+            Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+                + ": INVALIDATED in PHASE2 - close=" + DoubleToString(c.close, _Digits) 
+                + " broke below point_1=" + DoubleToString(p.point_1, _Digits));
             return false;
          }
          p.green1_count++;
@@ -305,6 +311,9 @@ bool UpdateSingleSellPattern(Pattern &p, MqlRates &c)
       else if(is_red)
       {
          p.phase = PHASE_INVALID;
+         Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+             + ": INVALIDATED in PHASE2 - red candle but only " + IntegerToString(p.green1_count) 
+             + " greens (need " + IntegerToString(MIN_GREEN_CANDLES) + ")");
       }
       return false;
    }
@@ -315,6 +324,9 @@ bool UpdateSingleSellPattern(Pattern &p, MqlRates &c)
       if(p.pullback1_high > 0.0 && c.close > p.pullback1_high)
       {
          p.phase = PHASE_INVALID;
+         Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+             + ": INVALIDATED in PHASE3 - close=" + DoubleToString(c.close, _Digits) 
+             + " broke above pullback1_high=" + DoubleToString(p.pullback1_high, _Digits));
          return false;
       }
       if(c.close < p.point_1)
@@ -334,6 +346,9 @@ bool UpdateSingleSellPattern(Pattern &p, MqlRates &c)
       if(p.pullback1_high > 0.0 && c.close > p.pullback1_high)
       {
          p.phase = PHASE_INVALID;
+         Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+             + ": INVALIDATED in PHASE4 - close=" + DoubleToString(c.close, _Digits) 
+             + " broke above pullback1_high=" + DoubleToString(p.pullback1_high, _Digits));
          return false;
       }
       if(is_green)
@@ -341,6 +356,9 @@ bool UpdateSingleSellPattern(Pattern &p, MqlRates &c)
          if(p.green2_count >= 1 && c.close < p.point_1)
          {
             p.phase = PHASE_INVALID;
+            Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+                + ": INVALIDATED in PHASE4 - close=" + DoubleToString(c.close, _Digits) 
+                + " broke below point_1=" + DoubleToString(p.point_1, _Digits));
             return false;
          }
          p.green2_count++;
@@ -367,6 +385,9 @@ bool UpdateSingleSellPattern(Pattern &p, MqlRates &c)
       if(p.pullback1_high > 0.0 && c.close > p.pullback1_high)
       {
          p.phase = PHASE_INVALID;
+         Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+             + ": INVALIDATED in PHASE5 - close=" + DoubleToString(c.close, _Digits) 
+             + " broke above pullback1_high=" + DoubleToString(p.pullback1_high, _Digits));
          return false;
       }
       if(p.point_2 > 0.0 && c.close <= p.point_2)
@@ -467,6 +488,9 @@ bool UpdateSingleBuyPattern(Pattern &p, MqlRates &c)
       else
       {
          p.phase = PHASE_INVALID;
+         Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+             + ": INVALIDATED in PHASE1 - red candle but only " + IntegerToString(p.green_count) 
+             + " greens (need " + IntegerToString(MIN_GREEN_CANDLES) + ")");
       }
       return false;
    }
@@ -479,6 +503,9 @@ bool UpdateSingleBuyPattern(Pattern &p, MqlRates &c)
          if(p.red1_count >= 1 && c.close > p.point_1)
          {
             p.phase = PHASE_INVALID;
+            Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+                + ": INVALIDATED in PHASE2 - close=" + DoubleToString(c.close, _Digits) 
+                + " broke above point_1=" + DoubleToString(p.point_1, _Digits));
             return false;
          }
          p.red1_count++;
@@ -501,6 +528,9 @@ bool UpdateSingleBuyPattern(Pattern &p, MqlRates &c)
       else if(is_green)
       {
          p.phase = PHASE_INVALID;
+         Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+             + ": INVALIDATED in PHASE2 - green candle but only " + IntegerToString(p.red1_count) 
+             + " reds (need " + IntegerToString(MIN_RED_CANDLES) + ")");
       }
       return false;
    }
@@ -511,6 +541,9 @@ bool UpdateSingleBuyPattern(Pattern &p, MqlRates &c)
       if(p.pullback1_low > 0.0 && c.close < p.pullback1_low)
       {
          p.phase = PHASE_INVALID;
+         Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+             + ": INVALIDATED in PHASE3 - close=" + DoubleToString(c.close, _Digits) 
+             + " broke below pullback1_low=" + DoubleToString(p.pullback1_low, _Digits));
          return false;
       }
       if(c.close > p.point_1)
@@ -530,6 +563,9 @@ bool UpdateSingleBuyPattern(Pattern &p, MqlRates &c)
       if(p.pullback1_low > 0.0 && c.close < p.pullback1_low)
       {
          p.phase = PHASE_INVALID;
+         Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+             + ": INVALIDATED in PHASE4 - close=" + DoubleToString(c.close, _Digits) 
+             + " broke below pullback1_low=" + DoubleToString(p.pullback1_low, _Digits));
          return false;
       }
       if(is_red)
@@ -537,6 +573,9 @@ bool UpdateSingleBuyPattern(Pattern &p, MqlRates &c)
          if(p.red2_count >= 1 && c.close > p.point_1)
          {
             p.phase = PHASE_INVALID;
+            Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+                + ": INVALIDATED in PHASE4 - close=" + DoubleToString(c.close, _Digits) 
+                + " broke above point_1=" + DoubleToString(p.point_1, _Digits));
             return false;
          }
          p.red2_count++;
@@ -563,6 +602,9 @@ bool UpdateSingleBuyPattern(Pattern &p, MqlRates &c)
       if(p.pullback1_low > 0.0 && c.close < p.pullback1_low)
       {
          p.phase = PHASE_INVALID;
+         Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+             + ": INVALIDATED in PHASE5 - close=" + DoubleToString(c.close, _Digits) 
+             + " broke below pullback1_low=" + DoubleToString(p.pullback1_low, _Digits));
          return false;
       }
       if(p.point_2 > 0.0 && c.close >= p.point_2)
