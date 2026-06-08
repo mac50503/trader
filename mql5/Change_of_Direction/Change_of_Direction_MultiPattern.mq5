@@ -18,6 +18,7 @@ input double   RISK_PERCENT           = 1.0;     // Risk per trade (%)
 input int      MAX_OPEN_POSITIONS     = 1;       // Max concurrent positions
 input bool     PAPER_TRADING_MODE     = false;   // Paper trading mode
 input bool     DEBUG_LOGS             = false;   // Debug logs
+input double   EMA_BUFFER_PCT         = 0.4;     // EMA neutral zone buffer (%)
 
 //+------------------------------------------------------------------+
 //| Logging helper                                                    |
@@ -120,24 +121,57 @@ double GetEMA40_M5()
 }
 
 //+------------------------------------------------------------------+
-//| Trend filters                                                     |
+//| Check if BUY is allowed based on trend (price > EMA40 M5)        |
 //+------------------------------------------------------------------+
 bool IsTrendBuyAllowed()
 {
    if(!ALLOW_LONG) return false;
    double ema40 = GetEMA40_M5();
-   if(ema40 <= 0.0) return true;
+   if(ema40 <= 0.0) return true; // No data yet, allow
+   
    double current_price = rates[1].close;
-   return current_price > ema40;
+   double upper_zone = ema40 * (1.0 + EMA_BUFFER_PCT / 100.0);
+   double lower_zone = ema40 * (1.0 - EMA_BUFFER_PCT / 100.0);
+   
+   // Only allow BUY if price is ABOVE the upper zone (clear uptrend)
+   if(current_price > upper_zone)
+   {
+      Log("[" + _Symbol + "] BUY allowed: price=" + DoubleToString(current_price, _Digits) 
+          + " > upper_zone=" + DoubleToString(upper_zone, _Digits));
+      return true;
+   }
+   
+   Log("[" + _Symbol + "] BUY blocked: price=" + DoubleToString(current_price, _Digits) 
+       + " in neutral zone [" + DoubleToString(lower_zone, _Digits) 
+       + " - " + DoubleToString(upper_zone, _Digits) + "]");
+   return false;
 }
 
+//+------------------------------------------------------------------+
+//| Check if SELL is allowed based on trend (price < EMA40 M5)       |
+//+------------------------------------------------------------------+
 bool IsTrendSellAllowed()
 {
    if(!ALLOW_SHORT) return false;
    double ema40 = GetEMA40_M5();
-   if(ema40 <= 0.0) return true;
+   if(ema40 <= 0.0) return true; // No data yet, allow
+   
    double current_price = rates[1].close;
-   return current_price < ema40;
+   double upper_zone = ema40 * (1.0 + EMA_BUFFER_PCT / 100.0);
+   double lower_zone = ema40 * (1.0 - EMA_BUFFER_PCT / 100.0);
+   
+   // Only allow SELL if price is BELOW the lower zone (clear downtrend)
+   if(current_price < lower_zone)
+   {
+      Log("[" + _Symbol + "] SELL allowed: price=" + DoubleToString(current_price, _Digits) 
+          + " < lower_zone=" + DoubleToString(lower_zone, _Digits));
+      return true;
+   }
+   
+   Log("[" + _Symbol + "] SELL blocked: price=" + DoubleToString(current_price, _Digits) 
+       + " in neutral zone [" + DoubleToString(lower_zone, _Digits) 
+       + " - " + DoubleToString(upper_zone, _Digits) + "]");
+   return false;
 }
 
 //+------------------------------------------------------------------+

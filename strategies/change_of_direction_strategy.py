@@ -78,6 +78,7 @@ class ChangeOfDirectionStrategy(BaseStrategy):
             "min_green_candles":  2,
             "allow_short":        True,
             "allow_long":         True,
+            "ema_buffer_pct":     0.4,  # EMA neutral zone buffer (%)
             # kept for compatibility with bot infrastructure
             "exit_pct_below_ema": 0.3,
             "ema_fast":           21,
@@ -543,20 +544,54 @@ class ChangeOfDirectionStrategy(BaseStrategy):
     # ── Trend Filter (EMA40 M5) ───────────────────────────────────────────────
 
     def _is_trend_buy_allowed(self, df: pd.DataFrame) -> bool:
-        """Returns True if current price is above EMA40 (M5)."""
+        """Returns True if current price is ABOVE upper zone (clear uptrend)."""
         if len(df) < 40:
             return True  # Not enough data, allow by default
+        
         ema40 = df["close"].ewm(span=40, adjust=False).mean().iloc[-1]
         current_price = df["close"].iloc[-1]
-        return current_price > ema40
+        
+        buffer_pct = self.params.get("ema_buffer_pct", 0.4)
+        upper_zone = ema40 * (1.0 + buffer_pct / 100.0)
+        lower_zone = ema40 * (1.0 - buffer_pct / 100.0)
+        
+        # Only allow BUY if price is ABOVE the upper zone (clear uptrend)
+        if current_price > upper_zone:
+            logger.debug(
+                f"BUY allowed: price={current_price:.5f} > upper_zone={upper_zone:.5f}"
+            )
+            return True
+        
+        logger.debug(
+            f"BUY blocked: price={current_price:.5f} in neutral zone "
+            f"[{lower_zone:.5f} - {upper_zone:.5f}]"
+        )
+        return False
 
     def _is_trend_sell_allowed(self, df: pd.DataFrame) -> bool:
-        """Returns True if current price is below EMA40 (M5)."""
+        """Returns True if current price is BELOW lower zone (clear downtrend)."""
         if len(df) < 40:
             return True  # Not enough data, allow by default
+        
         ema40 = df["close"].ewm(span=40, adjust=False).mean().iloc[-1]
         current_price = df["close"].iloc[-1]
-        return current_price < ema40
+        
+        buffer_pct = self.params.get("ema_buffer_pct", 0.4)
+        upper_zone = ema40 * (1.0 + buffer_pct / 100.0)
+        lower_zone = ema40 * (1.0 - buffer_pct / 100.0)
+        
+        # Only allow SELL if price is BELOW the lower zone (clear downtrend)
+        if current_price < lower_zone:
+            logger.debug(
+                f"SELL allowed: price={current_price:.5f} < lower_zone={lower_zone:.5f}"
+            )
+            return True
+        
+        logger.debug(
+            f"SELL blocked: price={current_price:.5f} in neutral zone "
+            f"[{lower_zone:.5f} - {upper_zone:.5f}]"
+        )
+        return False
 
     # ── Exit Check ────────────────────────────────────────────────────────────
 
