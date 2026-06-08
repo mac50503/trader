@@ -308,13 +308,7 @@ bool UpdateSingleSellPattern(Pattern &p, MqlRates &c)
             Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) + ": → PHASE4 (immediate break)");
          }
       }
-      else if(is_red)
-      {
-         p.phase = PHASE_INVALID;
-         Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
-             + ": INVALIDATED in PHASE2 - red candle but only " + IntegerToString(p.green1_count) 
-             + " greens (need " + IntegerToString(MIN_GREEN_CANDLES) + ")");
-      }
+      // else: red candle but not enough greens yet → stay in PHASE2, keep waiting
       return false;
    }
 
@@ -376,6 +370,7 @@ bool UpdateSingleSellPattern(Pattern &p, MqlRates &c)
             return GenerateSellEntry(p, c.close);
          }
       }
+      // else: red candle but not enough greens yet → stay in PHASE4, keep waiting
       return false;
    }
 
@@ -525,13 +520,7 @@ bool UpdateSingleBuyPattern(Pattern &p, MqlRates &c)
             Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) + ": → PHASE4 (immediate break)");
          }
       }
-      else if(is_green)
-      {
-         p.phase = PHASE_INVALID;
-         Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
-             + ": INVALIDATED in PHASE2 - green candle but only " + IntegerToString(p.red1_count) 
-             + " reds (need " + IntegerToString(MIN_RED_CANDLES) + ")");
-      }
+      // else: green candle but not enough reds yet → stay in PHASE2, keep waiting
       return false;
    }
 
@@ -593,6 +582,7 @@ bool UpdateSingleBuyPattern(Pattern &p, MqlRates &c)
             return GenerateBuyEntry(p, c.close);
          }
       }
+      // else: green candle but not enough reds yet → stay in PHASE4, keep waiting
       return false;
    }
 

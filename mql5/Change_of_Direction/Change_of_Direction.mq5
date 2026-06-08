@@ -306,23 +306,16 @@ void UpdateSellState(MqlRates &c)
          Log("[" + _Symbol + "] COD SELL PHASE2: green #" + IntegerToString(sell_green1_count)
              + " ph1=" + DoubleToString(sell_pullback1_high, _Digits));
       }
-      else if(is_red)
+      else if(is_red && sell_green1_count >= MIN_GREEN_CANDLES)
       {
-         if(sell_green1_count >= MIN_GREEN_CANDLES)
-         {
-            sell_phase = PHASE3_BREAK;
-            Log("[" + _Symbol + "] COD SELL PHASE3: waiting break of point_1="
-                + DoubleToString(sell_point_1, _Digits)
-                + " pullback1_high=" + DoubleToString(sell_pullback1_high, _Digits));
-            CheckSellBreak(c);
-         }
-         else
-         {
-            Log("[" + _Symbol + "] COD SELL RESET PHASE2: not enough greens ("
-                + IntegerToString(sell_green1_count) + "/" + IntegerToString(MIN_GREEN_CANDLES) + ")");
-            ResetSellState();
-         }
+         // Enough greens accumulated → advance to PHASE3
+         sell_phase = PHASE3_BREAK;
+         Log("[" + _Symbol + "] COD SELL PHASE3: waiting break of point_1="
+             + DoubleToString(sell_point_1, _Digits)
+             + " pullback1_high=" + DoubleToString(sell_pullback1_high, _Digits));
+         CheckSellBreak(c);
       }
+      // else: red candle but not enough greens yet → stay in PHASE2, keep waiting
       return;
    }
 
@@ -352,17 +345,16 @@ void UpdateSellState(MqlRates &c)
              + " point_2=" + DoubleToString(sell_point_2, _Digits)
              + " point_1=" + DoubleToString(sell_point_1, _Digits));
       }
-      else if(is_red)
+      else if(is_red && sell_green2_count >= MIN_GREEN_CANDLES)
       {
-         if(sell_green2_count >= MIN_GREEN_CANDLES)
-         {
-            sell_phase = PHASE5_ENTRY;
-            Log("[" + _Symbol + "] COD SELL PHASE5: waiting break of point_2="
-                + DoubleToString(sell_point_2, _Digits)
-                + " SL=" + DoubleToString(sell_pullback2_high, _Digits));
-            CheckSellEntry(c);
-         }
+         // Enough greens accumulated → advance to PHASE5
+         sell_phase = PHASE5_ENTRY;
+         Log("[" + _Symbol + "] COD SELL PHASE5: waiting break of point_2="
+             + DoubleToString(sell_point_2, _Digits)
+             + " SL=" + DoubleToString(sell_pullback2_high, _Digits));
+         CheckSellEntry(c);
       }
+      // else: red candle but not enough greens yet → stay in PHASE4, keep waiting
       return;
    }
 
@@ -488,22 +480,15 @@ void UpdateBuyState(MqlRates &c)
          Log("[" + _Symbol + "] COD BUY PHASE2: red #" + IntegerToString(buy_red1_count)
              + " pullback1_low=" + DoubleToString(buy_pullback1_low, _Digits));
       }
-      else if(is_green)
+      else if(is_green && buy_red1_count >= MIN_RED_CANDLES)
       {
-         if(buy_red1_count >= MIN_RED_CANDLES)
-         {
-            buy_phase = PHASE3_BREAK;
-            Log("[" + _Symbol + "] COD BUY PHASE3: waiting break of point_1="
-                + DoubleToString(buy_point_1, _Digits));
-            CheckBuyBreak(c);
-         }
-         else
-         {
-            Log("[" + _Symbol + "] COD BUY RESET PHASE2: not enough reds ("
-                + IntegerToString(buy_red1_count) + "/" + IntegerToString(MIN_RED_CANDLES) + ")");
-            ResetBuyState();
-         }
+         // Enough reds accumulated → advance to PHASE3
+         buy_phase = PHASE3_BREAK;
+         Log("[" + _Symbol + "] COD BUY PHASE3: waiting break of point_1="
+             + DoubleToString(buy_point_1, _Digits));
+         CheckBuyBreak(c);
       }
+      // else: green candle but not enough reds yet → stay in PHASE2, keep waiting
       return;
    }
 
@@ -535,12 +520,14 @@ void UpdateBuyState(MqlRates &c)
       }
       else if(is_green && buy_red2_count >= MIN_RED_CANDLES)
       {
+         // Enough reds accumulated → advance to PHASE5
          buy_phase = PHASE5_ENTRY;
          Log("[" + _Symbol + "] COD BUY PHASE5: waiting break of point_2="
              + DoubleToString(buy_point_2, _Digits)
              + " SL=" + DoubleToString(buy_pullback2_low, _Digits));
          CheckBuyEntry(c);
       }
+      // else: green candle but not enough reds yet → stay in PHASE4, keep waiting
       return;
    }
 
