@@ -80,21 +80,18 @@ class PatternPriorityStrategy(ChangeOfDirectionStrategy):
         if current_position:
             return self._check_exit(last, current_position)
 
-        # Trend filters
-        trend_buy_allowed = self._is_trend_buy_allowed(df)
-        trend_sell_allowed = self._is_trend_sell_allowed(df)
-
+        # Always update all patterns, trend filter applied at entry time
         # Update all SELL patterns
-        if self.params["allow_short"] and trend_sell_allowed:
-            signal = self._update_all_sell_patterns(last)
+        if self.params["allow_short"]:
+            signal = self._update_all_sell_patterns(last, df)
             if signal:
                 # First SELL pattern completed → reset everything
                 self._reset_all_patterns()
                 return signal
 
         # Update all BUY patterns
-        if self.params["allow_long"] and trend_buy_allowed:
-            signal = self._update_all_buy_patterns(last)
+        if self.params["allow_long"]:
+            signal = self._update_all_buy_patterns(last, df)
             if signal:
                 # First BUY pattern completed → reset everything
                 self._reset_all_patterns()
@@ -105,13 +102,12 @@ class PatternPriorityStrategy(ChangeOfDirectionStrategy):
         active_buy = len(self._buy_patterns)
         return Signal(
             "HOLD",
-            reason=f"COD Multi-Pattern: {active_sell} SELL patterns, {active_buy} BUY patterns tracked | "
-                   f"trend_buy={trend_buy_allowed} trend_sell={trend_sell_allowed}",
+            reason=f"COD Multi-Pattern: {active_sell} SELL patterns, {active_buy} BUY patterns tracked",
         )
 
     # ── Multi-pattern tracking for SELL ──────────────────────────────────────
 
-    def _update_all_sell_patterns(self, candle: pd.Series) -> Optional[Signal]:
+    def _update_all_sell_patterns(self, candle: pd.Series, df: pd.DataFrame) -> Optional[Signal]:
         """Update all SELL patterns and return signal if any completes."""
         o = candle["open"]
         c = candle["close"]
@@ -235,13 +231,21 @@ class PatternPriorityStrategy(ChangeOfDirectionStrategy):
                 pattern.phase = "INVALID"
                 return None
             if pattern.point_2 and c <= pattern.point_2:
-                return self._generate_sell_entry(pattern, c)
+                return self._generate_sell_entry(pattern, c, df)
             return None
 
         return None
 
-    def _generate_sell_entry(self, pattern: PatternState, entry_price: float) -> Signal:
+    def _generate_sell_entry(self, pattern: PatternState, entry_price: float, df: pd.DataFrame) -> Optional[Signal]:
         """Generate SELL entry signal from completed pattern."""
+        # Check trend filter before opening position
+        if not self._is_trend_sell_allowed(df):
+            pattern.phase = "INVALID"
+            logger.info(
+                f"Pattern #{pattern.id}: SELL BLOCKED by trend filter - invalidating pattern"
+            )
+            return None
+        
         stop_loss = pattern.pullback2_high
         risk = stop_loss - entry_price
         take_profit = entry_price - (risk * 2.0)
@@ -274,7 +278,7 @@ class PatternPriorityStrategy(ChangeOfDirectionStrategy):
 
     # ── Multi-pattern tracking for BUY ───────────────────────────────────────
 
-    def _update_all_buy_patterns(self, candle: pd.Series) -> Optional[Signal]:
+    def _update_all_buy_patterns(self, candle: pd.Series, df: pd.DataFrame) -> Optional[Signal]:
         """Update all BUY patterns and return signal if any completes."""
         o = candle["open"]
         c = candle["close"]
@@ -380,7 +384,7 @@ class PatternPriorityStrategy(ChangeOfDirectionStrategy):
                 pattern.phase = "PHASE5_ENTRY"
                 logger.debug(f"Pattern #{pattern.id}: → PHASE5, waiting for entry at {pattern.point_2:.5f}")
                 if pattern.point_2 and c >= pattern.point_2:
-                    return self._generate_buy_entry(pattern, c)
+                    return self._generate_buy_entry(pattern, c, df)
             return None
 
         # PHASE5: waiting for entry
@@ -389,13 +393,21 @@ class PatternPriorityStrategy(ChangeOfDirectionStrategy):
                 pattern.phase = "INVALID"
                 return None
             if pattern.point_2 and c >= pattern.point_2:
-                return self._generate_buy_entry(pattern, c)
+                return self._generate_buy_entry(pattern, c, df)
             return None
 
         return None
 
-    def _generate_buy_entry(self, pattern: PatternState, entry_price: float) -> Signal:
+    def _generate_buy_entry(self, pattern: PatternState, entry_price: float, df: pd.DataFrame) -> Optional[Signal]:
         """Generate BUY entry signal from completed pattern."""
+        # Check trend filter before opening position
+        if not self._is_trend_buy_allowed(df):
+            pattern.phase = "INVALID"
+            logger.info(
+                f"Pattern #{pattern.id}: BUY BLOCKED by trend filter - invalidating pattern"
+            )
+            return None
+        
         stop_loss = pattern.pullback2_low
         risk = entry_price - stop_loss
         take_profit = entry_price + (risk * 2.0)

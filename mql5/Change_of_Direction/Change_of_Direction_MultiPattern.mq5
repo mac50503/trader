@@ -230,8 +230,9 @@ void OnTick()
       CheckExitSignal(candle);
    else
    {
-      if(IsTrendSellAllowed()) UpdateAllSellPatterns(candle);
-      if(IsTrendBuyAllowed())  UpdateAllBuyPatterns(candle);
+      // Always update patterns, trend filter applied at entry time
+      UpdateAllSellPatterns(candle);
+      UpdateAllBuyPatterns(candle);
    }
 }
 
@@ -434,6 +435,15 @@ bool UpdateSingleSellPattern(Pattern &p, MqlRates &c)
 //+------------------------------------------------------------------+
 bool GenerateSellEntry(Pattern &p, double entry_price)
 {
+   // Check trend filter before opening position
+   if(!IsTrendSellAllowed())
+   {
+      p.phase = PHASE_INVALID;
+      Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+          + ": SELL BLOCKED by trend filter - invalidating pattern");
+      return false;  // Don't complete pattern, it will be removed
+   }
+   
    double stop_loss_price   = p.pullback2_high;
    double risk              = stop_loss_price - entry_price;
    double take_profit_price = entry_price - (risk * 2.0);
@@ -646,6 +656,15 @@ bool UpdateSingleBuyPattern(Pattern &p, MqlRates &c)
 //+------------------------------------------------------------------+
 bool GenerateBuyEntry(Pattern &p, double entry_price)
 {
+   // Check trend filter before opening position
+   if(!IsTrendBuyAllowed())
+   {
+      p.phase = PHASE_INVALID;
+      Log("[" + _Symbol + "] Pattern #" + IntegerToString(p.id) 
+          + ": BUY BLOCKED by trend filter - invalidating pattern");
+      return false;  // Don't complete pattern, it will be removed
+   }
+   
    double stop_loss_price   = p.pullback2_low;
    double risk              = entry_price - stop_loss_price;
    double take_profit_price = entry_price + (risk * 2.0);
