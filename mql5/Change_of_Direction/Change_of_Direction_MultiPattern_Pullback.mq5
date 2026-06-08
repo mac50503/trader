@@ -256,7 +256,7 @@ void UpdateTrailingStop(MqlRates &c)
    // Calculate how many risk levels we've passed
    int current_level = (int)MathFloor(profit_points / initial_risk);
    
-   // If we've passed a new risk level, update SL and TP
+   // If we've passed a new risk level, update SL and TP (less aggressive: 0.5x risk per level)
    if(current_level > risk_levels_passed && current_level >= 1)
    {
       risk_levels_passed = current_level;
@@ -266,15 +266,15 @@ void UpdateTrailingStop(MqlRates &c)
       
       if(current_position_direction == "BUY")
       {
-         // Move SL up by 1x risk
-         new_stop_loss = current_position_entry_price + ((risk_levels_passed) * initial_risk);
+         // Move SL up by 0.5x risk (less aggressive)
+         new_stop_loss = current_position_entry_price + ((risk_levels_passed * 0.5) * initial_risk);
          // Move TP out by 1x risk
          new_take_profit = current_position_entry_price + ((risk_levels_passed + 2) * initial_risk);
       }
       else // SELL
       {
-         // Move SL down by 1x risk
-         new_stop_loss = current_position_entry_price - ((risk_levels_passed) * initial_risk);
+         // Move SL down by 0.5x risk (less aggressive)
+         new_stop_loss = current_position_entry_price - ((risk_levels_passed * 0.5) * initial_risk);
          // Move TP out by 1x risk
          new_take_profit = current_position_entry_price - ((risk_levels_passed + 2) * initial_risk);
       }
