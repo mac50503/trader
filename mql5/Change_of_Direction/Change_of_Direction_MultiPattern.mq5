@@ -18,7 +18,7 @@ input double   RISK_PERCENT           = 1.0;     // Risk per trade (%)
 input int      MAX_OPEN_POSITIONS     = 1;       // Max concurrent positions
 input bool     PAPER_TRADING_MODE     = false;   // Paper trading mode
 input bool     DEBUG_LOGS             = false;   // Debug logs
-input double   EMA_BUFFER_PCT         = 0.4;     // EMA neutral zone buffer (%)
+input double   EMA_BUFFER_PCT         = 0.2;     // EMA neutral zone buffer (%)
 
 //+------------------------------------------------------------------+
 //| Logging helper                                                    |

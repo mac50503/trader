@@ -78,7 +78,7 @@ class ChangeOfDirectionStrategy(BaseStrategy):
             "min_green_candles":  2,
             "allow_short":        True,
             "allow_long":         True,
-            "ema_buffer_pct":     0.4,  # EMA neutral zone buffer (%)
+            "ema_buffer_pct":     0.2,  # EMA neutral zone buffer (%)
             # kept for compatibility with bot infrastructure
             "exit_pct_below_ema": 0.3,
             "ema_fast":           21,
