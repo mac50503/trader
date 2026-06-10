@@ -19,6 +19,9 @@ input int      MAX_OPEN_POSITIONS     = 1;       // Max concurrent positions
 input bool     PAPER_TRADING_MODE     = false;   // Paper trading mode
 input bool     DEBUG_LOGS             = false;   // Debug logs
 input double   EMA_BUFFER_PCT         = 0.2;     // EMA neutral zone buffer (%)
+input bool     USE_SESSION_FILTER     = true;    // Enable trading hours filter
+input int      TRADING_HOUR_START     = 9;       // Start hour (server time, inclusive)
+input int      TRADING_HOUR_END       = 4;       // End hour (server time, exclusive)
 
 //+------------------------------------------------------------------+
 //| Logging helper                                                    |
@@ -175,6 +178,21 @@ bool IsTrendSellAllowed()
 }
 
 //+------------------------------------------------------------------+
+//| Check if current hour is within trading session                  |
+//+------------------------------------------------------------------+
+bool IsWithinTradingHours()
+{
+   if(!USE_SESSION_FILTER) return true;
+   MqlDateTime dt;
+   TimeCurrent(dt);
+   int hour = dt.hour;
+   if(TRADING_HOUR_START < TRADING_HOUR_END)
+      return (hour >= TRADING_HOUR_START && hour < TRADING_HOUR_END);
+   else // overnight session (e.g., 22 to 6)
+      return (hour >= TRADING_HOUR_START || hour < TRADING_HOUR_END);
+}
+
+//+------------------------------------------------------------------+
 //| Reset all patterns                                                |
 //+------------------------------------------------------------------+
 void ResetAllPatterns()
@@ -230,6 +248,26 @@ void OnTick()
       CheckExitSignal(candle);
    else
    {
+      // Check trading hours and reset patterns when exiting active session
+      static bool was_in_session = true;
+      bool is_in_session = IsWithinTradingHours();
+      
+      // Detect session change from active to inactive
+      if(was_in_session && !is_in_session)
+      {
+         Print("[", _Symbol, "] Session ended. Resetting all patterns.");
+         ResetAllPatterns();
+      }
+      
+      was_in_session = is_in_session;
+      
+      // Only process patterns if within trading hours
+      if(!is_in_session)
+      {
+         Log("[" + _Symbol + "] Outside trading hours. Skipping pattern updates.");
+         return;
+      }
+      
       // Always update patterns, trend filter applied at entry time
       UpdateAllSellPatterns(candle);
       UpdateAllBuyPatterns(candle);

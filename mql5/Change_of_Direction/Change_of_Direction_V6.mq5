@@ -19,6 +19,10 @@ input double   MAX_DAILY_LOSS_PCT     = 30.0;    // Max daily loss (%) - reserve
 input int      MAX_OPEN_POSITIONS     = 1;       // Max concurrent positions (all broker positions)
 input bool     PAPER_TRADING_MODE     = false;  // true = only print, false = real orders
 input bool     DEBUG_LOGS             = false;   // true = print all phase transitions, false = silent
+input double   EMA_BUFFER_PCT         = 0.2;     // EMA neutral zone buffer (%)
+input bool     USE_SESSION_FILTER     = true;    // Enable trading hours filter
+input int      TRADING_HOUR_START     = 9;       // Start hour (server time, inclusive)
+input int      TRADING_HOUR_END       = 4;       // End hour (server time, exclusive)
 
 //+------------------------------------------------------------------+
 //| Logging helper — only prints when DEBUG_LOGS is true             |
@@ -117,6 +121,21 @@ double GetEMA40_M5()
    ArraySetAsSeries(ema_buf, true);
    if(CopyBuffer(ema40_handle, 0, 0, 1, ema_buf) <= 0) return 0.0;
    return ema_buf[0];
+}
+
+//+------------------------------------------------------------------+
+//| Check if current hour is within trading session                  |
+//+------------------------------------------------------------------+
+bool IsWithinTradingHours()
+{
+   if(!USE_SESSION_FILTER) return true;
+   MqlDateTime dt;
+   TimeCurrent(dt);
+   int hour = dt.hour;
+   if(TRADING_HOUR_START < TRADING_HOUR_END)
+      return (hour >= TRADING_HOUR_START && hour < TRADING_HOUR_END);
+   else // overnight session (e.g., 22 to 6)
+      return (hour >= TRADING_HOUR_START || hour < TRADING_HOUR_END);
 }
 
 //+------------------------------------------------------------------+
@@ -224,6 +243,27 @@ void OnTick()
       CheckExitSignal(candle);
    else
    {
+      // Check trading hours and reset patterns when exiting active session
+      static bool was_in_session = true;
+      bool is_in_session = IsWithinTradingHours();
+      
+      // Detect session change from active to inactive
+      if(was_in_session && !is_in_session)
+      {
+         Print("[", _Symbol, "] Session ended. Resetting all patterns.");
+         ResetSellState();
+         ResetBuyState();
+      }
+      
+      was_in_session = is_in_session;
+      
+      // Only process patterns if within trading hours
+      if(!is_in_session)
+      {
+         Log("[" + _Symbol + "] Outside trading hours. Skipping.");
+         return;
+      }
+      
       if(IsTrendSellAllowed()) UpdateSellState(candle);
       if(IsTrendBuyAllowed())  UpdateBuyState(candle);
    }

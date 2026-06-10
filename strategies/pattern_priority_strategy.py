@@ -63,6 +63,35 @@ class PatternPriorityStrategy(ChangeOfDirectionStrategy):
         self._sell_patterns: List[PatternState] = []
         self._buy_patterns: List[PatternState] = []
         self._next_pattern_id = 1
+        
+        # Trading hours filter
+        self._use_session_filter = params.get("use_session_filter", True) if params else True
+        self._trading_hour_start = params.get("trading_hour_start", 9) if params else 9
+        self._trading_hour_end = params.get("trading_hour_end", 4) if params else 4
+        self._was_in_session = True  # Track session state changes
+
+    # ── Override generate_signal to track multiple patterns ──────────────────
+
+    def _is_within_trading_hours(self, candle: pd.Series) -> bool:
+        """Check if current candle is within allowed trading hours."""
+        if not self._use_session_filter:
+            return True
+        
+        # Get hour from timestamp
+        from datetime import datetime
+        if isinstance(candle["timestamp"], str):
+            dt = datetime.fromisoformat(candle["timestamp"])
+        else:
+            dt = candle["timestamp"]
+        
+        hour = dt.hour
+        
+        # Normal session (e.g., 9 to 18)
+        if self._trading_hour_start < self._trading_hour_end:
+            return self._trading_hour_start <= hour < self._trading_hour_end
+        # Overnight session (e.g., 22 to 6)
+        else:
+            return hour >= self._trading_hour_start or hour < self._trading_hour_end
 
     # ── Override generate_signal to track multiple patterns ──────────────────
 
@@ -79,6 +108,20 @@ class PatternPriorityStrategy(ChangeOfDirectionStrategy):
 
         if current_position:
             return self._check_exit(last, current_position)
+
+        # Check trading hours and reset patterns when session ends
+        is_in_session = self._is_within_trading_hours(last)
+        
+        # Detect session change from active to inactive
+        if self._was_in_session and not is_in_session:
+            logger.info("Trading session ended. Resetting all patterns.")
+            self._reset_all_patterns()
+        
+        self._was_in_session = is_in_session
+        
+        # Only process patterns if within trading hours
+        if not is_in_session:
+            return Signal("HOLD", reason="Outside trading hours")
 
         # Always update all patterns, trend filter applied at entry time
         # Update all SELL patterns

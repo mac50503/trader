@@ -169,6 +169,70 @@ class SettingsPanel:
             bg=T["bg"], fg=T["text_dim"], font=("Segoe UI", 8), anchor=tk.W,
         ).pack(side=tk.LEFT)
 
+        # ── Trading Hours Filter ───────────────────────────────────────────
+        hours_frame = tk.LabelFrame(
+            scroll_frame, text=" Trading Hours Filter ",
+            bg=T["bg"], fg=T["text"],
+            font=T["font_title"], bd=1, relief=tk.FLAT,
+        )
+        hours_frame.pack(fill=tk.X, padx=8, pady=8)
+
+        # Enable filter toggle
+        toggle_row = tk.Frame(hours_frame, bg=T["bg"])
+        toggle_row.pack(fill=tk.X, padx=8, pady=8)
+        self._vars["use_session_filter"] = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            toggle_row, text="Enable Trading Hours Filter",
+            variable=self._vars["use_session_filter"],
+            bg=T["bg"], fg=T["text"],
+            selectcolor=T["bg_card"],
+            activebackground=T["bg"],
+        ).pack(side=tk.LEFT)
+
+        # Start hour
+        start_row = tk.Frame(hours_frame, bg=T["bg"])
+        start_row.pack(fill=tk.X, padx=8, pady=3)
+        tk.Label(
+            start_row, text="Trading Start Hour (0-23):", bg=T["bg"],
+            fg=T["text_dim"], width=22, anchor=tk.W,
+        ).pack(side=tk.LEFT)
+        self._vars["trading_hour_start"] = tk.StringVar(value="9")
+        tk.Entry(
+            start_row, textvariable=self._vars["trading_hour_start"],
+            bg=T["bg_card"], fg=T["text"],
+            insertbackground=T["text"],
+            relief=tk.FLAT, width=20,
+        ).pack(side=tk.LEFT, padx=8)
+
+        # End hour
+        end_row = tk.Frame(hours_frame, bg=T["bg"])
+        end_row.pack(fill=tk.X, padx=8, pady=3)
+        tk.Label(
+            end_row, text="Trading End Hour (0-23):", bg=T["bg"],
+            fg=T["text_dim"], width=22, anchor=tk.W,
+        ).pack(side=tk.LEFT)
+        self._vars["trading_hour_end"] = tk.StringVar(value="4")
+        tk.Entry(
+            end_row, textvariable=self._vars["trading_hour_end"],
+            bg=T["bg_card"], fg=T["text"],
+            insertbackground=T["text"],
+            relief=tk.FLAT, width=20,
+        ).pack(side=tk.LEFT, padx=8)
+
+        # Hint
+        hint_frame = tk.Frame(hours_frame, bg=T["bg"])
+        hint_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
+        hints_text = (
+            "  • Default: 9 AM to 4 AM (blocks 4-9 AM)\n"
+            "  • Patterns are reset when session ends (4 AM)\n"
+            "  • Use server time (MT5 broker time)"
+        )
+        tk.Label(
+            hint_frame, text=hints_text,
+            bg=T["bg"], fg=T["text_dim"], font=("Segoe UI", 8),
+            anchor=tk.W, justify=tk.LEFT,
+        ).pack(side=tk.LEFT)
+
         # ── Broker Settings ────────────────────────────────────────────────
         self._build_section(
             scroll_frame, "Broker Configuration",
@@ -274,6 +338,7 @@ class SettingsPanel:
                 "ema_fast", "ema_slow", "atr_period",
                 "touch_tolerance_atr", "exit_pct_below_ema",
                 "rsi_period", "use_rsi_filter", "allow_short",
+                "use_session_filter", "trading_hour_start", "trading_hour_end",
             ]
             for key in strategy_keys:
                 if key in self._vars:
@@ -333,6 +398,8 @@ class SettingsPanel:
             "max_daily_loss_pct":   config.MAX_DAILY_LOSS_PERCENT,
             "max_open_positions":   config.MAX_OPEN_POSITIONS,
             "tick_interval":        config.TICK_INTERVAL_SECONDS,
+            "trading_hour_start":   "9",
+            "trading_hour_end":     "4",
         }
         for key, value in defaults.items():
             if key in self._vars and isinstance(self._vars[key], tk.StringVar):
@@ -341,6 +408,8 @@ class SettingsPanel:
             self._vars["use_rsi_filter"].set(False)
         if "allow_short" in self._vars:
             self._vars["allow_short"].set(False)
+        if "use_session_filter" in self._vars:
+            self._vars["use_session_filter"].set(True)
 
     def _draw_pattern(self) -> None:
         """Open pattern visualizer window."""
