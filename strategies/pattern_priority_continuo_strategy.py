@@ -61,6 +61,86 @@ class PatternPriorityContinuoStrategy(ChangeOfDirectionStrategy):
         self._trading_hour_start = params.get("trading_hour_start", 9) if params else 9
         self._trading_hour_end = params.get("trading_hour_end", 4) if params else 4
         self._was_in_session = True  # Track session state changes
+        
+        # Continuous mode tracking
+        self._in_continuous_mode = False
+        self._continuous_direction = ""  # "SELL" or "BUY"
+        self._continuous_point_1 = 0.0
+        self._continuous_pullback_high = 0.0
+        self._continuous_pullback_low = 0.0
+        self._continuous_entries = 0
+
+    # ── Override _check_exit to handle continuous mode ───────────────────────
+
+    def _check_exit(self, last: pd.Series, position: Position) -> Signal:
+        """Check exit and manage continuous mode activation/deactivation."""
+        c = last["close"]
+
+        if position.direction == "SELL":
+            if c >= position.stop_loss:
+                # STOP LOSS HIT → Exit continuous mode
+                logger.info("STOP LOSS hit. Exiting continuous mode.")
+                self._in_continuous_mode = False
+                self._continuous_direction = ""
+                self._continuous_point_1 = 0.0
+                self._continuous_entries = 0
+                return Signal(
+                    action="CLOSE",
+                    reason=f"SELL SL hit. close={c:.5f} >= SL={position.stop_loss:.5f}",
+                )
+            if c <= position.take_profit:
+                # TAKE PROFIT HIT → Enter continuous mode
+                logger.info(f"TAKE PROFIT hit. Entering CONTINUOUS MODE (SELL).")
+                self._in_continuous_mode = True
+                self._continuous_direction = "SELL"
+                self._continuous_point_1 = c
+                self._continuous_pullback_high = 0.0
+                self._continuous_entries += 1
+                logger.info(
+                    f"CONTINUOUS SELL MODE: Entry #{self._continuous_entries} | "
+                    f"Looking for break below {c:.5f}"
+                )
+                return Signal(
+                    action="CLOSE",
+                    reason=f"SELL TP hit. close={c:.5f} <= TP={position.take_profit:.5f}",
+                )
+
+        elif position.direction == "BUY":
+            if c <= position.stop_loss:
+                # STOP LOSS HIT → Exit continuous mode
+                logger.info("STOP LOSS hit. Exiting continuous mode.")
+                self._in_continuous_mode = False
+                self._continuous_direction = ""
+                self._continuous_point_1 = 0.0
+                self._continuous_entries = 0
+                return Signal(
+                    action="CLOSE",
+                    reason=f"BUY SL hit. close={c:.5f} <= SL={position.stop_loss:.5f}",
+                )
+            if c >= position.take_profit:
+                # TAKE PROFIT HIT → Enter continuous mode
+                logger.info(f"TAKE PROFIT hit. Entering CONTINUOUS MODE (BUY).")
+                self._in_continuous_mode = True
+                self._continuous_direction = "BUY"
+                self._continuous_point_1 = c
+                self._continuous_pullback_low = 0.0
+                self._continuous_entries += 1
+                logger.info(
+                    f"CONTINUOUS BUY MODE: Entry #{self._continuous_entries} | "
+                    f"Looking for break above {c:.5f}"
+                )
+                return Signal(
+                    action="CLOSE",
+                    reason=f"BUY TP hit. close={c:.5f} >= TP={position.take_profit:.5f}",
+                )
+
+        return Signal(
+            "HOLD",
+            reason=(
+                f"{position.direction}: intact. "
+                f"close={c:.5f} SL={position.stop_loss:.5f} TP={position.take_profit:.5f}"
+            ),
+        )
 
     # ── Override generate_signal to track multiple patterns ──────────────────
 
@@ -92,7 +172,7 @@ class PatternPriorityContinuoStrategy(ChangeOfDirectionStrategy):
         df: pd.DataFrame,
         current_position: Optional[Position] = None,
     ) -> Signal:
-        """Evaluate all active patterns and return signal from first complete pattern."""
+        """Evaluate patterns or continuous mode and return signal."""
         if len(df) < 45:
             return Signal("HOLD", reason=f"Not enough data ({len(df)}/45 rows)")
 
@@ -101,43 +181,43 @@ class PatternPriorityContinuoStrategy(ChangeOfDirectionStrategy):
         if current_position:
             return self._check_exit(last, current_position)
 
-        # Check trading hours and reset patterns when session ends
+        # CONTINUOUS MODE: Only look for PHASE3 breaks
+        if self._in_continuous_mode:
+            if self._continuous_direction == "SELL":
+                return self._check_continuous_sell_entry(last, df)
+            elif self._continuous_direction == "BUY":
+                return self._check_continuous_buy_entry(last, df)
+
+        # NORMAL MODE: Check trading hours and patterns
         is_in_session = self._is_within_trading_hours(last)
         
-        # Detect session change from active to inactive
         if self._was_in_session and not is_in_session:
             logger.info("Trading session ended. Resetting all patterns.")
             self._reset_all_patterns()
         
         self._was_in_session = is_in_session
         
-        # Only process patterns if within trading hours
         if not is_in_session:
             return Signal("HOLD", reason="Outside trading hours")
 
-        # Always update all patterns, trend filter applied at entry time
-        # Update all SELL patterns
+        # Update all patterns, trend filter applied at entry time
         if self.params["allow_short"]:
             signal = self._update_all_sell_patterns(last, df)
             if signal:
-                # First SELL pattern completed → reset everything
                 self._reset_all_patterns()
                 return signal
 
-        # Update all BUY patterns
         if self.params["allow_long"]:
             signal = self._update_all_buy_patterns(last, df)
             if signal:
-                # First BUY pattern completed → reset everything
                 self._reset_all_patterns()
                 return signal
 
-        # Report status
         active_sell = len(self._sell_patterns)
         active_buy = len(self._buy_patterns)
         return Signal(
             "HOLD",
-            reason=f"COD Multi-Pattern: {active_sell} SELL patterns, {active_buy} BUY patterns tracked",
+            reason=f"COD Continuo: {active_sell} SELL patterns, {active_buy} BUY patterns tracked",
         )
 
     # ── Multi-pattern tracking for SELL ──────────────────────────────────────
@@ -472,6 +552,93 @@ class PatternPriorityContinuoStrategy(ChangeOfDirectionStrategy):
             take_profit=round(take_profit, 5),
             reason=f"Pattern #{pattern.id} BUY: entry={entry_price:.5f} SL={stop_loss:.5f} TP={take_profit:.5f}",
         )
+
+    # ── Continuous Mode Entry Checks ─────────────────────────────────────────
+
+    def _check_continuous_sell_entry(self, candle: pd.Series, df: pd.DataFrame) -> Optional[Signal]:
+        """Check for continuous SELL entry (PHASE3 break only)."""
+        o = candle["open"]
+        c = candle["close"]
+        h = candle["high"]
+        is_green = c > o
+
+        # Track pullback high
+        if is_green:
+            self._continuous_pullback_high = max(self._continuous_pullback_high, h)
+            logger.debug(f"CONTINUOUS SELL: Pullback green, high={self._continuous_pullback_high:.5f}")
+
+        # Check for break below continuous_point_1
+        if c < self._continuous_point_1:
+            entry_price = c
+            stop_loss = self._continuous_pullback_high if self._continuous_pullback_high > 0.0 else h
+            risk = stop_loss - entry_price
+            take_profit = entry_price - (risk * 2.0)
+
+            logger.info(
+                f"CONTINUOUS SELL ENTRY #{self._continuous_entries + 1}: "
+                f"entry={entry_price:.5f} SL={stop_loss:.5f} TP={take_profit:.5f} risk={risk:.5f}"
+            )
+
+            return Signal(
+                action="SELL",
+                stop_loss=round(stop_loss, 5),
+                take_profit=round(take_profit, 5),
+                reason=f"Continuous SELL #{self._continuous_entries + 1}: broke {self._continuous_point_1:.5f}",
+            )
+
+        # Invalidate if price goes too high
+        if self._continuous_pullback_high > 0.0 and c > self._continuous_pullback_high * 1.01:
+            logger.info("CONTINUOUS SELL INVALIDATED: Price too high. Exiting continuous mode.")
+            self._in_continuous_mode = False
+            self._continuous_direction = ""
+            self._continuous_point_1 = 0.0
+            self._continuous_entries = 0
+
+        return Signal("HOLD", reason=f"CONTINUOUS SELL: waiting for break below {self._continuous_point_1:.5f}")
+
+    def _check_continuous_buy_entry(self, candle: pd.Series, df: pd.DataFrame) -> Optional[Signal]:
+        """Check for continuous BUY entry (PHASE3 break only)."""
+        o = candle["open"]
+        c = candle["close"]
+        l = candle["low"]
+        is_red = c < o
+
+        # Track pullback low
+        if is_red:
+            if self._continuous_pullback_low == 0.0:
+                self._continuous_pullback_low = l
+            else:
+                self._continuous_pullback_low = min(self._continuous_pullback_low, l)
+            logger.debug(f"CONTINUOUS BUY: Pullback red, low={self._continuous_pullback_low:.5f}")
+
+        # Check for break above continuous_point_1
+        if c > self._continuous_point_1:
+            entry_price = c
+            stop_loss = self._continuous_pullback_low if self._continuous_pullback_low > 0.0 else l
+            risk = entry_price - stop_loss
+            take_profit = entry_price + (risk * 2.0)
+
+            logger.info(
+                f"CONTINUOUS BUY ENTRY #{self._continuous_entries + 1}: "
+                f"entry={entry_price:.5f} SL={stop_loss:.5f} TP={take_profit:.5f} risk={risk:.5f}"
+            )
+
+            return Signal(
+                action="BUY",
+                stop_loss=round(stop_loss, 5),
+                take_profit=round(take_profit, 5),
+                reason=f"Continuous BUY #{self._continuous_entries + 1}: broke {self._continuous_point_1:.5f}",
+            )
+
+        # Invalidate if price goes too low
+        if self._continuous_pullback_low > 0.0 and c < self._continuous_pullback_low * 0.99:
+            logger.info("CONTINUOUS BUY INVALIDATED: Price too low. Exiting continuous mode.")
+            self._in_continuous_mode = False
+            self._continuous_direction = ""
+            self._continuous_point_1 = 0.0
+            self._continuous_entries = 0
+
+        return Signal("HOLD", reason=f"CONTINUOUS BUY: waiting for break above {self._continuous_point_1:.5f}")
 
     # ── Reset all patterns ────────────────────────────────────────────────────
 

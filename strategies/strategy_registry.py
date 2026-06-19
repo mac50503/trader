@@ -10,6 +10,7 @@ from strategies.base_strategy import BaseStrategy
 from strategies.ema_trend_strategy import EmaTrendStrategy
 from strategies.change_of_direction_strategy import ChangeOfDirectionStrategy
 from strategies.pattern_priority_strategy import PatternPriorityStrategy
+from strategies.pattern_priority_continuo_strategy import PatternPriorityContinuoStrategy
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -25,6 +26,7 @@ class StrategyRegistry:
         "EMA Pullback Pro": EmaTrendStrategy,
         "Change of Direction": ChangeOfDirectionStrategy,
         "Pattern Priority": PatternPriorityStrategy,
+        "Pattern Priority Continuo": PatternPriorityContinuoStrategy,
     }
 
     @classmethod
