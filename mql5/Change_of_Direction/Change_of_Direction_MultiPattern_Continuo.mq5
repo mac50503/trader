@@ -54,6 +54,16 @@ double         current_position_stop_loss  = 0.0;
 double         current_position_take_profit = 0.0;
 
 //+------------------------------------------------------------------+
+//| Global Variables — Continuous Mode                                |
+//+------------------------------------------------------------------+
+bool           in_continuous_mode          = false;  // Active after TP hit
+string         continuous_direction        = "";     // "SELL" or "BUY"
+double         continuous_point_1          = 0.0;    // Reference level to break
+double         continuous_pullback_high    = 0.0;    // For SELL continuous
+double         continuous_pullback_low     = 0.0;    // For BUY continuous
+int            continuous_entries          = 0;      // Counter of continuous entries
+
+//+------------------------------------------------------------------+
 //| Global Variables — SELL state machine                             |
 //+------------------------------------------------------------------+
 int            sell_phase               = PHASE_IDLE;
@@ -241,8 +251,17 @@ void OnTick()
 
    if(is_position_open)
       CheckExitSignal(candle);
+   else if(in_continuous_mode)
+   {
+      // CONTINUOUS MODE: Only look for PHASE3 breaks
+      if(continuous_direction == "SELL")
+         CheckContinuousSellEntry(candle);
+      else if(continuous_direction == "BUY")
+         CheckContinuousBuyEntry(candle);
+   }
    else
    {
+      // NORMAL MODE: Look for complete patterns
       // Check trading hours and reset patterns when exiting active session
       static bool was_in_session = true;
       bool is_in_session = IsWithinTradingHours();
@@ -655,13 +674,147 @@ void CheckExitSignal(MqlRates &c)
 
    if(current_position_direction == "SELL")
    {
-      if(c.close >= current_position_stop_loss)  { ClosePosition("Stop Loss hit"); return; }
-      if(c.close <= current_position_take_profit) { ClosePosition("Take Profit hit"); return; }
+      if(c.close >= current_position_stop_loss)  
+      { 
+         // STOP LOSS HIT → Break continuous mode
+         Print("[", _Symbol, "] STOP LOSS hit. Exiting continuous mode.");
+         in_continuous_mode = false;
+         continuous_direction = "";
+         continuous_point_1 = 0.0;
+         continuous_entries = 0;
+         ClosePosition("Stop Loss hit"); 
+         return; 
+      }
+      if(c.close <= current_position_take_profit) 
+      { 
+         // TAKE PROFIT HIT → Enter continuous mode
+         Print("[", _Symbol, "] TAKE PROFIT hit. Entering CONTINUOUS MODE.");
+         in_continuous_mode = true;
+         continuous_direction = "SELL";
+         continuous_point_1 = c.close;  // New reference point
+         continuous_pullback_high = 0.0;
+         continuous_entries++;
+         Print("[", _Symbol, "] CONTINUOUS SELL MODE: Entry #", continuous_entries, 
+               " | Looking for break below ", DoubleToString(continuous_point_1, _Digits));
+         ClosePosition("Take Profit hit"); 
+         return; 
+      }
    }
    else if(current_position_direction == "BUY")
    {
-      if(c.close <= current_position_stop_loss)  { ClosePosition("Stop Loss hit"); return; }
-      if(c.close >= current_position_take_profit) { ClosePosition("Take Profit hit"); return; }
+      if(c.close <= current_position_stop_loss)  
+      { 
+         // STOP LOSS HIT → Break continuous mode
+         Print("[", _Symbol, "] STOP LOSS hit. Exiting continuous mode.");
+         in_continuous_mode = false;
+         continuous_direction = "";
+         continuous_point_1 = 0.0;
+         continuous_entries = 0;
+         ClosePosition("Stop Loss hit"); 
+         return; 
+      }
+      if(c.close >= current_position_take_profit) 
+      { 
+         // TAKE PROFIT HIT → Enter continuous mode
+         Print("[", _Symbol, "] TAKE PROFIT hit. Entering CONTINUOUS MODE.");
+         in_continuous_mode = true;
+         continuous_direction = "BUY";
+         continuous_point_1 = c.close;  // New reference point
+         continuous_pullback_low = 0.0;
+         continuous_entries++;
+         Print("[", _Symbol, "] CONTINUOUS BUY MODE: Entry #", continuous_entries, 
+               " | Looking for break above ", DoubleToString(continuous_point_1, _Digits));
+         ClosePosition("Take Profit hit"); 
+         return; 
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Check Continuous SELL Entry (PHASE3 only)                         |
+//+------------------------------------------------------------------+
+void CheckContinuousSellEntry(MqlRates &c)
+{
+   bool is_green = c.close > c.open;
+   bool is_red   = c.close < c.open;
+   
+   // Track pullback high
+   if(is_green)
+   {
+      continuous_pullback_high = MathMax(continuous_pullback_high, c.high);
+      Log("[" + _Symbol + "] CONTINUOUS SELL: Pullback green, high=" + 
+          DoubleToString(continuous_pullback_high, _Digits));
+   }
+   
+   // Check for break below continuous_point_1
+   if(c.close < continuous_point_1)
+   {
+      double entry_price       = c.close;
+      double stop_loss_price   = continuous_pullback_high > 0.0 ? continuous_pullback_high : c.high;
+      double risk              = stop_loss_price - entry_price;
+      double take_profit_price = entry_price - (risk * 2.0);
+      
+      Print("[", _Symbol, "] CONTINUOUS SELL ENTRY #", continuous_entries + 1, 
+            ": close=", DoubleToString(entry_price, _Digits),
+            " SL=", DoubleToString(stop_loss_price, _Digits),
+            " TP=", DoubleToString(take_profit_price, _Digits),
+            " risk=", DoubleToString(risk, _Digits));
+      
+      OpenPosition("SELL", stop_loss_price, take_profit_price);
+   }
+   
+   // Reset if price goes too high (invalidates continuous mode)
+   if(continuous_pullback_high > 0.0 && c.close > continuous_pullback_high + (continuous_pullback_high * 0.01))
+   {
+      Print("[", _Symbol, "] CONTINUOUS SELL INVALIDATED: Price too high. Exiting continuous mode.");
+      in_continuous_mode = false;
+      continuous_direction = "";
+      continuous_point_1 = 0.0;
+      continuous_entries = 0;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Check Continuous BUY Entry (PHASE3 only)                          |
+//+------------------------------------------------------------------+
+void CheckContinuousBuyEntry(MqlRates &c)
+{
+   bool is_green = c.close > c.open;
+   bool is_red   = c.close < c.open;
+   
+   // Track pullback low
+   if(is_red)
+   {
+      continuous_pullback_low = continuous_pullback_low == 0.0 ? c.low : MathMin(continuous_pullback_low, c.low);
+      Log("[" + _Symbol + "] CONTINUOUS BUY: Pullback red, low=" + 
+          DoubleToString(continuous_pullback_low, _Digits));
+   }
+   
+   // Check for break above continuous_point_1
+   if(c.close > continuous_point_1)
+   {
+      double entry_price       = c.close;
+      double stop_loss_price   = continuous_pullback_low > 0.0 ? continuous_pullback_low : c.low;
+      double risk              = entry_price - stop_loss_price;
+      double take_profit_price = entry_price + (risk * 2.0);
+      
+      Print("[", _Symbol, "] CONTINUOUS BUY ENTRY #", continuous_entries + 1, 
+            ": close=", DoubleToString(entry_price, _Digits),
+            " SL=", DoubleToString(stop_loss_price, _Digits),
+            " TP=", DoubleToString(take_profit_price, _Digits),
+            " risk=", DoubleToString(risk, _Digits));
+      
+      OpenPosition("BUY", stop_loss_price, take_profit_price);
+   }
+   
+   // Reset if price goes too low (invalidates continuous mode)
+   if(continuous_pullback_low > 0.0 && c.close < continuous_pullback_low - (continuous_pullback_low * 0.01))
+   {
+      Print("[", _Symbol, "] CONTINUOUS BUY INVALIDATED: Price too low. Exiting continuous mode.");
+      in_continuous_mode = false;
+      continuous_direction = "";
+      continuous_point_1 = 0.0;
+      continuous_entries = 0;
    }
 }
 
