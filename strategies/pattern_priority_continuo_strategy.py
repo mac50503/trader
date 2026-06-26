@@ -1,12 +1,13 @@
 """
 strategies/pattern_priority_continuo_strategy.py
 -------------------------------------------------
-Pattern Priority Continuo Strategy — Continuous multi-pattern tracking.
-Never resets patterns when one completes. Tracks patterns independently.
+Pattern Priority Continuo Strategy — Multi-pattern tracking with continuous mode.
 
 Philosophy:
-    Track multiple patterns continuously. When one completes, only that pattern
-    is removed. Other patterns continue tracking independently.
+    After a pattern completes and reaches Take Profit, the strategy enters
+    "continuous mode" where it only looks for simplified PHASE3 breaks (pullback + break)
+    instead of complete PHASE1-5 patterns. If Stop Loss is hit, it exits continuous
+    mode and returns to normal pattern detection.
 """
 
 from typing import Optional, List, Dict, Any
@@ -45,8 +46,10 @@ class PatternState:
 
 class PatternPriorityContinuoStrategy(ChangeOfDirectionStrategy):
     """
-    Pattern Priority Continuo Strategy — continuous multi-pattern tracking.
-    Patterns continue independently, no global reset when one completes.
+    Pattern Priority Continuo Strategy — Multi-pattern tracking with continuous mode.
+    
+    After TP hit: enters continuous mode (simplified PHASE3 detection).
+    After SL hit: exits continuous mode (returns to full pattern detection).
     """
 
     def __init__(self, params: Optional[dict] = None):

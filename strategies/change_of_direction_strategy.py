@@ -551,7 +551,7 @@ class ChangeOfDirectionStrategy(BaseStrategy):
         ema40 = df["close"].ewm(span=40, adjust=False).mean().iloc[-1]
         current_price = df["close"].iloc[-1]
         
-        buffer_pct = self.params.get("ema_buffer_pct", 0.4)
+        buffer_pct = self.params.get("ema_buffer_pct", 0.2)
         upper_zone = ema40 * (1.0 + buffer_pct / 100.0)
         lower_zone = ema40 * (1.0 - buffer_pct / 100.0)
         
@@ -576,7 +576,7 @@ class ChangeOfDirectionStrategy(BaseStrategy):
         ema40 = df["close"].ewm(span=40, adjust=False).mean().iloc[-1]
         current_price = df["close"].iloc[-1]
         
-        buffer_pct = self.params.get("ema_buffer_pct", 0.4)
+        buffer_pct = self.params.get("ema_buffer_pct", 0.2)
         upper_zone = ema40 * (1.0 + buffer_pct / 100.0)
         lower_zone = ema40 * (1.0 - buffer_pct / 100.0)
         
