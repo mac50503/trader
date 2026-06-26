@@ -40,12 +40,13 @@ trader/
 │   └── pattern_visualizer.py      # Visual entry pattern diagram
 │
 ├── strategies/
-│   ├── base_strategy.py                    # Abstract base + Signal dataclass
-│   ├── ema_trend_strategy.py               # EMA Pullback Pro
-│   ├── change_of_direction_strategy.py     # Change of Direction (single pattern)
-│   ├── pattern_priority_strategy.py        # COD Multi-Pattern (tracks all patterns)
-│   ├── strategy_registry.py                # Strategy registry + hot-swap
-│   └── CHANGE_OF_DIRECTION.md              # COD strategy documentation
+│   ├── base_strategy.py                        # Abstract base + Signal dataclass
+│   ├── ema_trend_strategy.py                   # EMA Pullback Pro
+│   ├── change_of_direction_strategy.py         # Change of Direction (single pattern)
+│   ├── pattern_priority_strategy.py            # COD Multi-Pattern (tracks all patterns)
+│   ├── pattern_priority_continuo_strategy.py   # COD Multi-Pattern Continuo (continuous mode)
+│   ├── strategy_registry.py                    # Strategy registry + hot-swap
+│   └── CHANGE_OF_DIRECTION.md                  # COD strategy documentation
 │
 ├── brokers/
 │   ├── base_broker.py             # Abstract interface
@@ -83,12 +84,14 @@ trader/
 │   │   ├── EMA_Pullback_Pro.mq5
 │   │   └── README.md
 │   └── Change_of_Direction/
-│       ├── Change_of_Direction_V6.mq5          # ✅ Base version
-│       ├── Change_of_Direction_V7.mq5          # ⚠️ Experimental
-│       ├── Change_of_Direction_MultiPattern.mq5 # 🆕 Multi-pattern
-│       ├── README.md                           # Main guide
-│       ├── README_MultiPattern.md              # V8 specific guide
-│       └── VERSION_COMPARISON.md               # Detailed version comparison
+│       ├── Change_of_Direction_V6.mq5                    # ✅ Base version (single pattern)
+│       ├── Change_of_Direction_V7.mq5                    # ⚠️ Experimental
+│       ├── Change_of_Direction_MultiPattern.mq5          # 🆕 Multi-pattern tracking
+│       ├── Change_of_Direction_MultiPattern_Continuo.mq5 # 🆕 Multi-pattern + Continuous mode
+│       ├── CONTINUOUS_MODE_LOGIC.md                      # Continuous mode documentation
+│       ├── README.md                                     # Main guide
+│       ├── README_MultiPattern.md                        # V8 specific guide
+│       └── VERSION_COMPARISON.md                         # Detailed version comparison
 │
 └── logs/
 ```
@@ -145,6 +148,11 @@ SELL: stop = price × (1 + exit_pct%)  [only moves DOWN]
 
 Reversal strategy using a 4-phase state machine. Identifies trend reversals through candle patterns and price action.
 
+**Available Variants**:
+- **Single Pattern** (`change_of_direction_strategy.py`) - Tracks 1 SELL + 1 BUY pattern
+- **Multi-Pattern** (`pattern_priority_strategy.py`) - Tracks ALL patterns, first to complete wins
+- **Multi-Pattern Continuo** (`pattern_priority_continuo_strategy.py`) - After TP, enters continuous mode
+
 **Entry (SELL) — 4 phases**:
 
 ```
@@ -171,12 +179,22 @@ PHASE 5 — Entry
 
 **Entry (BUY)** — mirror logic.
 
+**Advanced Features**:
+- **EMA Neutral Zone** (0.2%) - Avoids trades when price oscillates around EMA40 M5
+- **Trading Hours Filter** - Blocks trades during configured hours (default: 4 AM - 9 AM blocked)
+- **Trend Filter** - Only SELL below EMA40, only BUY above EMA40 (applied at entry time)
+- **Continuous Mode** (Continuo variant only) - After TP hit, looks for simplified PHASE3 breaks instead of full patterns
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `min_red_candles` | 2 | Min consecutive red candles (PHASE 1) |
 | `min_green_candles` | 2 | Min green candles per pullback |
 | `allow_short` | True | Enable SELL signals |
 | `allow_long` | True | Enable BUY signals |
+| `ema_buffer_pct` | 0.2 | EMA neutral zone buffer (%) |
+| `use_session_filter` | True | Enable trading hours filter |
+| `trading_hour_start` | 9 | Start hour (server time, inclusive) |
+| `trading_hour_end` | 4 | End hour (server time, exclusive) |
 
 ---
 
@@ -221,6 +239,7 @@ Both strategies are available as MQL5 EAs with **multiple versions** and identic
 | **Change of Direction** | `change_of_direction_strategy.py` | **V6** (single pattern) | ✅ Base version — proven & stable |
 | | | **V7** (experimental) | ⚠️ Testing only — stricter validation |
 | | `pattern_priority_strategy.py` | **V8** (multi-pattern) | 🆕 Tracks all patterns, first wins |
+| | `pattern_priority_continuo_strategy.py` | **V9** (multi-pattern + continuous) | 🆕 After TP: continuous mode |
 | **EMA Pullback Pro** | `ema_trend_strategy.py` | **V1** | Classic EMA bounce strategy |
 
 ### Change of Direction Versions
@@ -230,8 +249,32 @@ Both strategies are available as MQL5 EAs with **multiple versions** and identic
 | V6 | `Change_of_Direction_V6.mq5` | 1 SELL + 1 BUY | `change_of_direction_strategy.py` | ✅ Production |
 | V7 | `Change_of_Direction_V7.mq5` | 1 SELL + 1 BUY | *(testing only)* | ⚠️ Experimental |
 | V8 | `Change_of_Direction_MultiPattern.mq5` | Multiple patterns | `pattern_priority_strategy.py` | ✅ Production |
+| V9 | `Change_of_Direction_MultiPattern_Continuo.mq5` | Multiple patterns + continuous mode | `pattern_priority_continuo_strategy.py` | ✅ Production |
 
-**Recommended**: Start with **V6** for stability, upgrade to **V8** for more opportunities.
+**Recommended**: 
+- **V6** - Start here for stability and proven performance
+- **V8** - Upgrade for more trade opportunities (tracks all patterns simultaneously)
+- **V9** - Best for trending markets (continues after TP with simplified detection)
+
+### V9 Continuous Mode
+
+After a position reaches **Take Profit**, the EA enters "continuous mode":
+- ✅ **No longer** looks for complete PHASE1-5 patterns
+- ✅ **Only looks for** simplified PHASE3 breaks (pullback + break of exit price)
+- ✅ **If TP hit again** → stays in continuous mode, updates reference point
+- ✅ **If SL hit** → exits continuous mode, returns to full pattern detection
+
+**Example**:
+```
+Entry #1 (normal): Pattern completes → SELL @ 4500, SL=4520, TP=4460
+→ TP hit @ 4460 → Enter CONTINUOUS MODE
+
+Entry #2 (continuous): Pullback to 4475, breaks 4460 → SELL @ 4458, SL=4475, TP=4424
+→ TP hit @ 4424 → Stay in CONTINUOUS MODE
+
+Entry #3 (continuous): Pullback to 4435, breaks 4424 → SELL @ 4420, SL=4435, TP=4390
+→ SL hit @ 4435 → EXIT CONTINUOUS MODE, return to full pattern detection
+```
 
 ### Installation
 
@@ -243,6 +286,8 @@ Both strategies are available as MQL5 EAs with **multiple versions** and identic
 ### Documentation
 
 - **Main guide**: `mql5/Change_of_Direction/README.md`
+- **Multi-pattern guide**: `mql5/Change_of_Direction/README_MultiPattern.md`
+- **Continuous mode guide**: `mql5/Change_of_Direction/CONTINUOUS_MODE_LOGIC.md`
 - **Version comparison**: `mql5/Change_of_Direction/VERSION_COMPARISON.md`
 - **Conversion guide**: `mql5/MQL5_CONVERSION_GUIDE.md`
 
@@ -258,6 +303,9 @@ input bool PAPER_TRADING_MODE = true;  // Start with this
 ```
 [XAUUSD] Pattern #2 SELL ENTRY: close=2610.00 SL=2618.50 TP=2593.00
 [XAUUSD] [PAPER] SELL @ 2610.00 lot=0.10 SL=2618.50 TP=2593.00
+[XAUUSD] TAKE PROFIT hit. Entering CONTINUOUS MODE.
+[XAUUSD] CONTINUOUS SELL MODE: Entry #1 | Looking for break below 2593.00
+[XAUUSD] CONTINUOUS SELL ENTRY #2: close=2590.00 SL=2598.00 TP=2574.00
 ```
 
 ---
@@ -302,14 +350,19 @@ Main Thread (Tkinter UI)
 
 | Message | Meaning |
 |---------|---------|
-| `COD: sell=PHASE1_DROP` | COD detected first red candles |
-| `COD: sell=PHASE2_PULLBACK1` | COD in first pullback |
-| `COD: sell=PHASE3_BREAK` | COD waiting for break of point_1 |
-| `COD: sell=PHASE4_PULLBACK2` | COD in second pullback |
-| `COD: sell=PHASE5_ENTRY` | COD waiting for entry confirmation |
-| `COD SELL ENTRY: close=X <= point_2=Y` | SELL executed |
+| `Pattern #X: SELL PHASE1 started` | COD detected first red candles (multi-pattern) |
+| `Pattern #X: → PHASE2` | COD in first pullback |
+| `Pattern #X: → PHASE3` | COD waiting for break of point_1 |
+| `Pattern #X: → PHASE4` | COD in second pullback |
+| `Pattern #X: → PHASE5` | COD waiting for entry confirmation |
+| `Pattern #X SELL ENTRY: close=X SL=Y TP=Z` | SELL executed |
+| `Pattern #X: SELL BLOCKED by trend filter` | Entry blocked (price in EMA neutral zone) |
+| `TAKE PROFIT hit. Entering CONTINUOUS MODE` | Continuous mode activated (V9 only) |
+| `CONTINUOUS SELL ENTRY #N: close=X` | Continuous entry executed |
+| `STOP LOSS hit. Exiting continuous mode` | Continuous mode deactivated |
 | `EMA touch+bounce: EMA=X between open=Y close=Z` | EMA BUY entry |
 | `Stop hit: XAUUSD BUY price=X stop=Y` | Trailing stop triggered |
+| `Session ended. Resetting all patterns` | Trading hours filter triggered |
 
 ---
 
